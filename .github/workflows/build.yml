@@ -42,7 +42,34 @@ jobs:
           path: build/libs/*.jar
           if-no-files-found: error
 
-  release:
+  # 平时推送：jar 自动更新到「最新构建 (Nightly)」预发布版
+  release-nightly:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/1.12.2'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Industrial-Platform-${{ github.sha }}
+          path: dist
+
+      - name: Update Nightly release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          target_commitish: ${{ github.sha }}
+          name: 最新构建 (Nightly)
+          body: |
+            自动构建 · 分支: ${{ github.ref_name }} · 提交: [${{ github.sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
+          prerelease: true
+          files: dist/*.jar
+          overwrite_files: true
+
+  # 打 v* 标签：发布正式版本
+  release-version:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
