@@ -1,137 +1,204 @@
 package dev.celestiacraft.industrialplatform.platform;
 
-import net.minecraft.world.item.Item;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.state.BlockState;
+import dev.celestiacraft.industrialplatform.block.PlatformBuilderBlock;
+import dev.celestiacraft.industrialplatform.config.BlockRef;
+import dev.celestiacraft.industrialplatform.config.PlatformConfig;
+import net.minecraft.block.Block;
+import net.minecraft.block.state.IBlockState;
+import net.minecraft.init.Blocks;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.World;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 
 /**
- * 平台底板生成器.
- * <p>
- * 图案规则(和原来的结构 NBT 完全一致, 所以 1x1 区块的内置平台外观不变):
- * <ul>
- *     <li>最外一圈: 条纹, (x + z) 为偶数用主色, 奇数用副色</li>
- *     <li>边框内侧: 每隔 {@link #LAMP_SPACING} 格一盏灯, 四个内角一定有</li>
- *     <li>棋盘样式: (x + z) 为奇数用底色, 偶数用副色; 工业样式: 整片底色</li>
- * </ul>
+ * Server-side generation planning, driven by the same {@link PlatformLayout} as
+ * the hologram preview. A cell that already holds exactly the right block is
+ * left untouched and not charged; anything else inside the footprint is replaced
+ * — except bedrock, tile entities (chests etc.) and other platform builders,
+ * which are always protected. The returned plan is ordered for the build
+ * animation: bottom-up, rippling outward from the builder.
  */
-public class PlatformGenerator {
-	/**
-	 * 边框宽度(格)
-	 */
-	public static final int BORDER_WIDTH = 1;
-	/**
-	 * 灯距离外圈的内缩格数
-	 */
-	public static final int LAMP_INSET = 1;
-	/**
-	 * 灯沿边框的间隔(格)
-	 */
-	public static final int LAMP_SPACING = 15;
+public final class PlatformGenerator {
 
-	/**
-	 * 放置一个平台方块时的回调, 坐标是相对控制器所在区块角落的局部坐标
-	 */
-	public interface DeckConsumer {
-		void accept(int localX, int localZ, BlockState state);
-	}
+    /** One block to place, at its exact final position. */
+    public static final class Placement {
+        public final BlockPos pos;
+        public final IBlockState state;
 
-	public static void forEachDeck(PlatformStyle style, PlatformPalette palette, PlatformLayout layout, DeckConsumer consumer) {
-		int width = layout.width();
-		int depth = layout.depth();
+        Placement(BlockPos pos, IBlockState state) {
+            this.pos = pos;
+            this.state = state;
+        }
+    }
 
-		for (int z = 0; z < depth; z++) {
-			for (int x = 0; x < width; x++) {
-				consumer.accept(x, z, deckStateAt(style, palette, layout, x, z));
-			}
-		}
-	}
+    /** Everything to place, ordered bottom-up and center-out for the build animation. */
+    public static final class BuildPlan {
+        public final List<Placement> placements;
+        public final int matched;
+        public final int skipped;
 
-	/**
-	 * 某个局部坐标上应该放什么
-	 */
-	public static BlockState deckStateAt(PlatformStyle style, PlatformPalette palette, PlatformLayout layout, int localX, int localZ) {
-		int width = layout.width();
-		int depth = layout.depth();
+        BuildPlan(List<Placement> placements, int matched, int skipped) {
+            this.placements = placements;
+            this.matched = matched;
+            this.skipped = skipped;
+        }
+    }
 
-		boolean border = localX < BORDER_WIDTH
-				|| localZ < BORDER_WIDTH
-				|| localX >= width - BORDER_WIDTH
-				|| localZ >= depth - BORDER_WIDTH;
+    private PlatformGenerator() {
+    }
 
-		if (border) {
-			return (localX + localZ) % 2 == 0 ? palette.borderPrimary() : palette.borderSecondary();
-		}
+    /** Chunk center the layout is anchored on, in cell-grid coordinates. */
+    public static int anchorCoord(BlockPos anchor, int axisCoord, int center) {
+        // anchor must land on the fixed CENTER of the builder's chunk so a rebuild
+        // or expansion always grows around the same point, never drifts
+        int chunk = anchor.getX() >> 4;
+        if (axisCoord == anchor.getZ()) {
+            chunk = anchor.getZ() >> 4;
+        }
+        return chunk * 16 + 8;
+    }
 
-		if (isLampPosition(width, depth, localX, localZ)) {
-			return palette.lamp();
-		}
+    public static BuildPlan plan(World world, BlockPos anchor, PlatformConfig cfg) {
+        cfg.clamp();
+        PlatformLayout layout = new PlatformLayout(cfg);
 
-		if (style == PlatformStyle.CHECKERBOARD) {
-			return (localX + localZ) % 2 == 1 ? palette.base() : palette.checker();
-		}
+        int anchorX = (anchor.getX() >> 4) * 16 + 8 + cfg.offsetX;
+        int anchorZ = (anchor.getZ() >> 4) * 16 + 8 + cfg.offsetZ;
+        int x0 = anchorX - layout.centerX;
+        int z0 = anchorZ - layout.centerZ;
+        int y0 = Math.max(0, Math.min(255, anchor.getY() + cfg.offsetY));
 
-		return palette.base();
-	}
+        List<Placement> placements = new ArrayList<Placement>();
+        int matched = 0;
+        int skipped = 0;
 
-	/**
-	 * 灯只在边框内侧那一圈上, 并且沿圈每隔 LAMP_SPACING 格一盏
-	 */
-	public static boolean isLampPosition(int width, int depth, int localX, int localZ) {
-		int minX = LAMP_INSET;
-		int minZ = LAMP_INSET;
-		int maxX = width - 1 - LAMP_INSET;
-		int maxZ = depth - 1 - LAMP_INSET;
+        for (int layer = 0; layer < cfg.layers; layer++) {
+            int y = y0 + layer;
+            if (y > 255) {
+                break;
+            }
+            for (int z = 0; z < layout.sizeZ; z++) {
+                for (int x = 0; x < layout.sizeX; x++) {
+                    PlatformRole role = layout.roleAt(layer, x, z);
+                    BlockRef ref = cfg.get(role);
+                    if (ref.isAir()) {
+                        continue;
+                    }
+                    BlockPos pos = new BlockPos(x0 + x, y, z0 + z);
+                    IBlockState target = ref.block.getStateFromMeta(ref.meta);
+                    if (world.getBlockState(pos) == target) {
+                        matched++; // already exactly what we need — free
+                        continue;
+                    }
+                    if (!cfg.replaceExisting && !isSoftReplaceable(world.getBlockState(pos))) {
+                        skipped++; // keep mode: existing solid block stays
+                        continue;
+                    }
+                    if (!canReplace(world, pos)) {
+                        skipped++;
+                        continue;
+                    }
+                    placements.add(new Placement(pos, target));
+                }
+            }
+        }
 
-		if (localX < minX || localX > maxX || localZ < minZ || localZ > maxZ) {
-			return false;
-		}
+        // center blocks are placed independently of the role logic, so a cell
+        // already holding the fill material can't swallow the center block.
+        // the builder block itself occupies one of the center cells — it IS that
+        // center, so it must be excluded from the plan or its cell would stay empty
+        BlockRef center = cfg.get(PlatformRole.CENTER);
+        if (!center.isAir()) {
+            int surfaceY = y0 + cfg.layers - 1;
+            if (surfaceY <= 255) {
+                int periodX = layout.cellX + layout.gap;
+                int periodZ = layout.cellZ + layout.gap;
+                for (int gi = 0; gi < layout.countX; gi++) {
+                    for (int gj = 0; gj < layout.countZ; gj++) {
+                        int baseX = gi * periodX;
+                        int baseZ = gj * periodZ;
+                        for (int lz = 0; lz < layout.cellZ; lz++) {
+                            for (int lx = 0; lx < layout.cellX; lx++) {
+                                if (!layout.isCenterCell(lx, lz, layout.cellX, layout.cellZ)) {
+                                    continue;
+                                }
+                                BlockPos pos = new BlockPos(x0 + baseX + lx, surfaceY, z0 + baseZ + lz);
+                                if (pos.equals(new BlockPos(anchorX, surfaceY, anchorZ))) {
+                                    continue; // the chunk center is reserved for the builder
+                                }
+                                IBlockState target = center.block.getStateFromMeta(center.meta);
+                                IBlockState current = world.getBlockState(pos);
+                                if (current == target) {
+                                    matched++;
+                                } else if (!canReplace(world, pos)) {
+                                    skipped++;
+                                    dev.celestiacraft.industrialplatform.IndustrialPlatform.LOGGER.info(
+                                            "Center cell {} SKIPPED (current={})", pos, current);
+                                } else {
+                                    placements.add(new Placement(pos, target));
+                                    dev.celestiacraft.industrialplatform.IndustrialPlatform.LOGGER.info(
+                                            "Center cell {} PLANNED (current={})", pos, current);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
-		if (localZ == minZ || localZ == maxZ) {
-			return isLampAlong(localX, minX, maxX);
-		}
+        // animation order: bottom-up, and on each layer a ripple from the chunk center
+        final int cx = anchorX;
+        final int cz = anchorZ;
+        placements.sort(new Comparator<Placement>() {
+            @Override
+            public int compare(Placement a, Placement b) {
+                int layerDelta = Integer.compare(a.pos.getY(), b.pos.getY());
+                if (layerDelta != 0) {
+                    return layerDelta;
+                }
+                int da = dist2(a.pos, cx, cz);
+                int db = dist2(b.pos, cx, cz);
+                if (da != db) {
+                    return Integer.compare(da, db);
+                }
+                return a.pos.compareTo(b.pos);
+            }
+        });
 
-		if (localX == minX || localX == maxX) {
-			return isLampAlong(localZ, minZ, maxZ);
-		}
+        return new BuildPlan(placements, matched, skipped);
+    }
 
-		return false;
-	}
+    private static int dist2(BlockPos pos, int cx, int cz) {
+        int dx = pos.getX() - cx;
+        int dz = pos.getZ() - cz;
+        return dx * dx + dz * dz;
+    }
 
-	private static boolean isLampAlong(int value, int min, int max) {
-		return value == min || value == max || (value - min) % LAMP_SPACING == 0;
-	}
+    /** Hard protections: never replace bedrock, tile entities or platform builders. */
+    public static boolean canReplace(World world, BlockPos pos) {
+        IBlockState current = world.getBlockState(pos);
+        Block block = current.getBlock();
+        if (block.hasTileEntity(current)) {
+            return false; // chests, machines... never eat tile entities
+        }
+        if (block == Blocks.BEDROCK || block instanceof PlatformBuilderBlock) {
+            return false;
+        }
+        return true;
+    }
 
-	/**
-	 * 底板 + 向下填充的垫底方块, 一共要消耗多少物品
-	 */
-	public static Map<Item, Integer> countMaterials(PlatformStyle style, PlatformPalette palette, PlatformLayout layout, int downFill, BlockState filler) {
-		Map<Item, Integer> materials = new LinkedHashMap<>();
-
-		forEachDeck(style, palette, layout, (localX, localZ, state) -> {
-			add(materials, state, 1);
-		});
-
-		int layers = Math.max(0, downFill);
-		if (layers > 0 && filler != null && !filler.isAir()) {
-			add(materials, filler, layout.area() * layers);
-		}
-
-		return materials;
-	}
-
-	private static void add(Map<Item, Integer> materials, BlockState state, int amount) {
-		if (state == null || state.isAir() || amount <= 0) {
-			return;
-		}
-
-		Item item = state.getBlock().asItem();
-		if (item == Blocks.AIR.asItem()) {
-			return;
-		}
-
-		materials.merge(item, amount, Integer::sum);
-	}
+    /** Air, fluids and vanilla-replaceable blocks (grass, snow...) — always free to fill. */
+    public static boolean isSoftReplaceable(IBlockState state) {
+        Block block = state.getBlock();
+        if (block == net.minecraft.init.Blocks.AIR) {
+            return true;
+        }
+        net.minecraft.block.material.Material material = state.getMaterial();
+        return material == net.minecraft.block.material.Material.WATER
+                || material == net.minecraft.block.material.Material.LAVA
+                || material.isReplaceable();
+    }
 }

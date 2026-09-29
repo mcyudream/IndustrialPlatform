@@ -1,187 +1,183 @@
 package dev.celestiacraft.industrialplatform.platform;
 
-import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraftforge.common.capabilities.ForgeCapabilities;
-import net.minecraftforge.items.IItemHandler;
-import net.minecraftforge.items.ItemHandlerHelper;
-import net.minecraftforge.items.wrapper.InvWrapper;
-import net.minecraftforge.items.wrapper.RangedWrapper;
+import dev.celestiacraft.industrialplatform.config.BlockRef;
+import dev.celestiacraft.industrialplatform.config.PlatformConfig;
+import net.minecraft.block.state.IBlockState;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.util.NonNullList;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.World;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
- * 材料来源: 玩家主背包 + 控制器周围一小圈容器.
- * <p>
- * 容器范围: 水平 ±{@link #CONTAINER_RADIUS} 格, 上下各 {@link #CONTAINER_UP} / {@link #CONTAINER_DOWN} 格
+ * Checks the player's inventory against the material bill and consumes it.
+ * Creative players neither need nor lose materials.
  */
-public class MaterialScanner {
-	public static final int CONTAINER_RADIUS = 4;
-	public static final int CONTAINER_UP = 1;
-	public static final int CONTAINER_DOWN = 1;
-	/**
-	 * 只动主背包与快捷栏
-	 */
-	private static final int PLAYER_SLOTS = 36;
+public final class MaterialScanner {
 
-	public static List<IItemHandler> sources(ServerLevel level, BlockPos controllerPos, Player player) {
-		List<IItemHandler> sources = new ArrayList<>();
-		sources.add(new RangedWrapper(new InvWrapper(player.getInventory()), 0, PLAYER_SLOTS));
+    private MaterialScanner() {
+    }
 
-		BlockPos min = controllerPos.offset(-CONTAINER_RADIUS, -CONTAINER_DOWN, -CONTAINER_RADIUS);
-		BlockPos max = controllerPos.offset(CONTAINER_RADIUS, CONTAINER_UP, CONTAINER_RADIUS);
+    public static Map<BlockRef, Integer> required(PlatformConfig cfg) {
+        return new PlatformLayout(cfg).requiredMaterials();
+    }
 
-		for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
-			BlockEntity blockEntity = level.getBlockEntity(pos);
-			if (blockEntity == null || pos.equals(controllerPos)) {
-				continue;
-			}
+    /**
+     * World-aware bill: every cell that already holds exactly the target block is
+     * reusable and left out of the bill, so rebuilding never double-charges. With
+     * {@code replaceExisting} off, solid non-matching blocks are kept and also
+     * left out (only air / fluids / replaceable cells get filled).
+     */
+    public static Map<BlockRef, Integer> required(World world, BlockPos anchor, PlatformConfig cfg) {
+        PlatformLayout layout = new PlatformLayout(cfg);
+        int anchorX = (anchor.getX() >> 4) * 16 + 8 + cfg.offsetX;
+        int anchorZ = (anchor.getZ() >> 4) * 16 + 8 + cfg.offsetZ;
+        int x0 = anchorX - layout.centerX;
+        int z0 = anchorZ - layout.centerZ;
+        int y0 = Math.max(0, Math.min(255, anchor.getY() + cfg.offsetY));
+        Map<BlockRef, Integer> counts = new LinkedHashMap<BlockRef, Integer>();
+        for (int layer = 0; layer < cfg.layers; layer++) {
+            int y = y0 + layer;
+            if (y > 255) {
+                break;
+            }
+            for (int z = 0; z < layout.sizeZ; z++) {
+                for (int x = 0; x < layout.sizeX; x++) {
+                    BlockRef ref = cfg.get(layout.roleAt(layer, x, z));
+                    if (ref.isAir()) {
+                        continue;
+                    }
+                    IBlockState current = world.getBlockState(new BlockPos(x0 + x, y, z0 + z));
+                    if (current.getBlock() == ref.block
+                            && current.getBlock().getMetaFromState(current) == ref.meta) {
+                        continue; // already the right block — reusable, no cost
+                    }
+                    if (!cfg.replaceExisting && !PlatformGenerator.isSoftReplaceable(current)) {
+                        continue; // keep mode: existing solid blocks stay, no cost
+                    }
+                    Integer old = counts.get(ref);
+                    counts.put(ref, old == null ? 1 : old + 1);
+                }
+            }
+        }
+        // center blocks billed independently of the role logic (see PlatformGenerator);
+        // the builder's own center cell is excluded (it IS the center there)
+        BlockRef center = cfg.get(PlatformRole.CENTER);
+        if (!center.isAir()) {
+            int surfaceY = y0 + cfg.layers - 1;
+            if (surfaceY <= 255) {
+                int periodX = layout.cellX + layout.gap;
+                int periodZ = layout.cellZ + layout.gap;
+                for (int gi = 0; gi < layout.countX; gi++) {
+                    for (int gj = 0; gj < layout.countZ; gj++) {
+                        for (int lz = 0; lz < layout.cellZ; lz++) {
+                            for (int lx = 0; lx < layout.cellX; lx++) {
+                                if (!layout.isCenterCell(lx, lz, layout.cellX, layout.cellZ)) {
+                                    continue;
+                                }
+                                BlockPos pos = new BlockPos(x0 + gi * periodX + lx, surfaceY, z0 + gj * periodZ + lz);
+                                if (pos.equals(new BlockPos(anchorX, surfaceY, anchorZ))) {
+                                    continue;
+                                }
+                                IBlockState current = world.getBlockState(pos);
+                                if (current.getBlock() == center.block
+                                        && current.getBlock().getMetaFromState(current) == center.meta) {
+                                    continue;
+                                }
+                                Integer old = counts.get(center);
+                                counts.put(center, old == null ? 1 : old + 1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return counts;
+    }
 
-			blockEntity.getCapability(ForgeCapabilities.ITEM_HANDLER)
-					.resolve()
-					.ifPresent(sources::add);
-		}
+    /** @return role -> how many blocks the player still has to gather. */
+    public static Map<BlockRef, Integer> missing(EntityPlayer player, PlatformConfig cfg) {
+        return missing(player, required(cfg));
+    }
 
-		return sources;
-	}
+    public static Map<BlockRef, Integer> missing(EntityPlayer player, Map<BlockRef, Integer> bill) {
+        Map<BlockRef, Integer> missing = new LinkedHashMap<BlockRef, Integer>();
+        if (player.capabilities.isCreativeMode) {
+            return missing;
+        }
+        for (Map.Entry<BlockRef, Integer> entry : bill.entrySet()) {
+            int have = countOf(player, entry.getKey());
+            if (have < entry.getValue()) {
+                missing.put(entry.getKey(), entry.getValue() - have);
+            }
+        }
+        return missing;
+    }
 
-	/**
-	 * 统计每种材料现有多少
-	 */
-	public static Map<Item, Integer> count(ServerLevel level, BlockPos controllerPos, Player player, Map<Item, Integer> needed) {
-		Map<Item, Integer> available = new LinkedHashMap<>();
-		List<IItemHandler> sources = sources(level, controllerPos, player);
+    public static int countOf(EntityPlayer player, BlockRef ref) {
+        if (ref.isAir()) {
+            return Integer.MAX_VALUE;
+        }
+        Item item = Item.getItemFromBlock(ref.block);
+        int count = 0;
+        for (ItemStack stack : player.inventory.mainInventory) {
+            if (matches(stack, item, ref.meta)) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
 
-		needed.keySet().forEach((item) -> {
-			int total = 0;
-			for (IItemHandler handler : sources) {
-				total += countItem(handler, item);
-			}
-			available.put(item, total);
-		});
+    /** Removes the full bill from the inventory; call only after {@link #missing} was empty. */
+    public static Map<BlockRef, Integer> consume(EntityPlayer player, PlatformConfig cfg) {
+        return consume(player, required(cfg));
+    }
 
-		return available;
-	}
+    public static Map<BlockRef, Integer> consume(EntityPlayer player, Map<BlockRef, Integer> bill) {
+        Map<BlockRef, Integer> consumed = new LinkedHashMap<BlockRef, Integer>();
+        if (player.capabilities.isCreativeMode) {
+            return consumed;
+        }
+        for (Map.Entry<BlockRef, Integer> entry : bill.entrySet()) {
+            take(player, entry.getKey(), entry.getValue());
+            consumed.put(entry.getKey(), entry.getValue());
+        }
+        player.inventory.markDirty();
+        return consumed;
+    }
 
-	public static boolean canAfford(ServerLevel level, BlockPos controllerPos, Player player, Map<Item, Integer> needed) {
-		List<IItemHandler> sources = sources(level, controllerPos, player);
+    private static void take(EntityPlayer player, BlockRef ref, int amount) {
+        Item item = Item.getItemFromBlock(ref.block);
+        NonNullList<ItemStack> inv = player.inventory.mainInventory;
+        for (int i = 0; i < inv.size() && amount > 0; i++) {
+            ItemStack stack = inv.get(i);
+            if (matches(stack, item, ref.meta)) {
+                int take = Math.min(amount, stack.getCount());
+                stack.shrink(take);
+                amount -= take;
+                if (stack.getCount() <= 0) {
+                    inv.set(i, ItemStack.EMPTY);
+                }
+            }
+        }
+    }
 
-		for (Map.Entry<Item, Integer> entry : needed.entrySet()) {
-			int total = 0;
+    private static boolean matches(ItemStack stack, Item item, int meta) {
+        return !stack.isEmpty() && stack.getItem() == item && stack.getItemDamage() == meta;
+    }
 
-			for (IItemHandler handler : sources) {
-				total += countItem(handler, entry.getKey());
-				if (total >= entry.getValue()) {
-					break;
-				}
-			}
-
-			if (total < entry.getValue()) {
-				return false;
-			}
-		}
-
-		return true;
-	}
-
-	/**
-	 * 还缺哪几种材料(给玩家提示用)
-	 */
-	public static Map<Item, Integer> missing(ServerLevel level, BlockPos controllerPos, Player player, Map<Item, Integer> needed) {
-		Map<Item, Integer> available = count(level, controllerPos, player, needed);
-		Map<Item, Integer> missing = new LinkedHashMap<>();
-
-		needed.forEach((item, amount) -> {
-			int have = available.getOrDefault(item, 0);
-			if (have < amount) {
-				missing.put(item, amount - have);
-			}
-		});
-
-		return missing;
-	}
-
-	public static boolean consume(ServerLevel level, BlockPos controllerPos, Player player, Map<Item, Integer> needed) {
-		List<IItemHandler> sources = sources(level, controllerPos, player);
-		Map<Item, Integer> taken = new LinkedHashMap<>();
-
-		for (Map.Entry<Item, Integer> entry : needed.entrySet()) {
-			int remaining = entry.getValue();
-
-			for (IItemHandler handler : sources) {
-				remaining -= extract(handler, entry.getKey(), remaining);
-				if (remaining <= 0) {
-					break;
-				}
-			}
-
-			if (remaining > 0) {
-				taken.put(entry.getKey(), entry.getValue() - remaining);
-				refund(sources, taken);
-				return false;
-			}
-
-			taken.put(entry.getKey(), entry.getValue());
-		}
-
-		return true;
-	}
-
-	/**
-	 * 把材料还回去(放置失败时用)
-	 */
-	public static void give(ServerLevel level, BlockPos controllerPos, Player player, Map<Item, Integer> items) {
-		refund(sources(level, controllerPos, player), items);
-	}
-
-	private static int countItem(IItemHandler handler, Item item) {
-		int total = 0;
-
-		for (int slot = 0; slot < handler.getSlots(); slot++) {
-			ItemStack stack = handler.getStackInSlot(slot);
-			if (stack.is(item)) {
-				total += stack.getCount();
-			}
-		}
-
-		return total;
-	}
-
-	private static int extract(IItemHandler handler, Item item, int amount) {
-		int taken = 0;
-
-		for (int slot = 0; slot < handler.getSlots() && taken < amount; slot++) {
-			ItemStack stack = handler.getStackInSlot(slot);
-			if (!stack.is(item)) {
-				continue;
-			}
-
-			ItemStack extracted = handler.extractItem(slot, amount - taken, false);
-			taken += extracted.getCount();
-		}
-
-		return taken;
-	}
-
-	private static void refund(List<IItemHandler> sources, Map<Item, Integer> taken) {
-		taken.forEach((item, amount) -> {
-			int remaining = amount;
-
-			for (IItemHandler handler : sources) {
-				if (remaining <= 0) {
-					return;
-				}
-
-				ItemStack leftover = ItemHandlerHelper.insertItemStacked(handler, new ItemStack(item, remaining), false);
-				remaining = leftover.getCount();
-			}
-		});
-	}
+    public static String formatMissing(Map<BlockRef, Integer> missing) {
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<BlockRef, Integer> entry : missing.entrySet()) {
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            sb.append(entry.getKey().displayName()).append(" x").append(entry.getValue());
+        }
+        return sb.toString();
+    }
 }

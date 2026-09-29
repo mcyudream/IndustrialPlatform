@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "ISI",
+    "SRS",
+    "ISI"
+  ],
+  "key": {
+    "I": { "item": "minecraft:iron_ingot", "data": 0 },
+    "S": { "item": "minecraft:stone", "data": 0 },
+    "R": { "item": "minecraft:redstone", "data": 0 }
+  },
+  "result": {
+    "item": "industrial_platform:platform_builder",
+    "data": 0,
+    "count": 1
+  }
+}

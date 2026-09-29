@@ -1,0 +1,74 @@
+itemGroup.industrial_platform=工业平台
+
+tile.industrial_platform.platform_builder.name=工业平台搭建器
+
+ip.gui.title=平台配置
+ip.gui.layers=层数
+ip.gui.start_y=起始 Y
+ip.gui.interval_x=边界间隔 X
+ip.gui.interval_z=边界间隔 Z
+ip.gui.size=块大小
+ip.gui.mode.all=全部方块
+ip.gui.mode.inv=背包
+ip.gui.count_x=平面数量 X
+ip.gui.count_z=平面数量 Z
+ip.gui.link=道路宽
+ip.gui.offset_x=偏移 X
+ip.gui.offset_z=偏移 Z
+ip.gui.offset_y=偏移 Y
+ip.gui.offset_group=偏移
+ip.gui.channel_width=通道宽度
+ip.gui.channel_mode=通道选项
+ip.gui.mode.none=模式: 无
+ip.gui.mode.straight=模式: 直线
+ip.gui.mode.horseshoe=模式: 马蹄
+ip.gui.center_mark=中心标记
+ip.gui.preview_toggle=预览显示
+ip.gui.replace=替换方块
+ip.gui.on=开
+ip.gui.off=关
+ip.gui.blueprint=蓝图: %s
+ip.gui.blueprint_custom=自定义
+ip.gui.refresh=刷新蓝图
+ip.gui.preview=预览
+ip.gui.preview.title=平台预览
+ip.gui.preview.caption=尺寸 %s×%s · %s 层 · 底 Y=%s
+ip.gui.build=搭建
+ip.gui.done=完成
+ip.gui.no_blueprint=没有可用蓝图, 请检查 config/industrial_platform/blueprints
+ip.gui.blueprint_applied=已应用蓝图: %s
+ip.gui.role_set=%s 已设为 %s
+ip.gui.no_builder=目标方块不再是平台搭建器
+
+ip.gui.role.border=边框方块
+ip.gui.role.fill=填充方块
+ip.gui.role.center=中心方块
+ip.gui.role.boundary=边界
+ip.gui.role.link=道路材料
+ip.gui.role.body=主体
+ip.gui.role.edge=边缘
+ip.gui.role.channel=通道中心线
+ip.gui.role.mark=中心标记
+
+ip.gui.picker.title=选择方块: %s
+ip.gui.picker.meta=数据值
+ip.gui.picker.air=无 (空气)
+
+ip.msg.missing_list=材料不足: %s
+ip.msg.build_success=平台搭建完成: 放置 %s 个, 复用已有 %s 个, 跳过 %s 个
+ip.msg.consumed=已消耗 %s 种材料
+ip.msg.build_started=正在搭建平台...
+ip.gui.need=材料清单
+ip.gui.missing=缺少
+ip.gui.bill=材料清单
+ip.gui.bill_empty=没有需要消耗的材料
+
+ip.cmd.blueprints_loaded=已加载 %s 个蓝图
+
+ip.hover.title=工业平台搭建器
+ip.hover.size=尺寸: %s×%s
+ip.hover.layers=层数: %s (Y %s ~ %s)
+ip.hover.lack=缺
+ip.hover.enough=足够
+ip.hover.preview=预览显示: %s
+ip.hover.open=右键打开配置

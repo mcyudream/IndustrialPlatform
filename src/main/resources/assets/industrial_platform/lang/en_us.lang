@@ -1,0 +1,74 @@
+itemGroup.industrial_platform=Industrial Platform
+
+tile.industrial_platform.platform_builder.name=Platform Builder
+
+ip.gui.title=Platform Configuration
+ip.gui.layers=Layers
+ip.gui.start_y=Start Y
+ip.gui.interval_x=Boundary Interval X
+ip.gui.interval_z=Boundary Interval Z
+ip.gui.size=Cell Size
+ip.gui.mode.all=All Blocks
+ip.gui.mode.inv=Inventory
+ip.gui.count_x=Grid Count X
+ip.gui.count_z=Grid Count Z
+ip.gui.link=Link Width
+ip.gui.offset_x=Offset X
+ip.gui.offset_z=Offset Z
+ip.gui.offset_y=Offset Y
+ip.gui.offset_group=Offset
+ip.gui.channel_width=Channel Width
+ip.gui.channel_mode=Channel Options
+ip.gui.mode.none=Mode: None
+ip.gui.mode.straight=Mode: Straight
+ip.gui.mode.horseshoe=Mode: Horseshoe
+ip.gui.center_mark=Center Marker
+ip.gui.preview_toggle=Show Preview
+ip.gui.replace=Replace Blocks
+ip.gui.on=ON
+ip.gui.off=OFF
+ip.gui.blueprint=Blueprint: %s
+ip.gui.blueprint_custom=Custom
+ip.gui.refresh=Reload Blueprints
+ip.gui.preview=Preview
+ip.gui.preview.title=Platform Preview
+ip.gui.preview.caption=Size %sx%s · %s layer(s) · base Y=%s
+ip.gui.build=Build
+ip.gui.done=Done
+ip.gui.no_blueprint=No blueprints found, check config/industrial_platform/blueprints
+ip.gui.blueprint_applied=Applied blueprint: %s
+ip.gui.role_set=%s set to %s
+ip.gui.no_builder=Target block is no longer a platform builder
+
+ip.gui.role.border=Border Block
+ip.gui.role.fill=Fill Block
+ip.gui.role.center=Center Block
+ip.gui.role.boundary=Boundary
+ip.gui.role.link=Road Material
+ip.gui.role.body=Main Body
+ip.gui.role.edge=Edge
+ip.gui.role.channel=Channel Centerline
+ip.gui.role.mark=Center Marker
+
+ip.gui.picker.title=Pick Block: %s
+ip.gui.picker.meta=Metadata
+ip.gui.picker.air=None (air)
+
+ip.msg.missing_list=Missing materials: %s
+ip.msg.build_success=Platform built: placed %s, reused %s, skipped %s
+ip.msg.consumed=Consumed %s material kind(s)
+ip.msg.build_started=Building platform...
+ip.gui.need=Materials
+ip.gui.missing=Missing
+ip.gui.bill=Materials
+ip.gui.bill_empty=Nothing to consume
+
+ip.cmd.blueprints_loaded=Loaded %s blueprint(s)
+
+ip.hover.title=Industrial Platform Builder
+ip.hover.size=Size: %sx%s
+ip.hover.layers=Layers: %s (Y %s ~ %s)
+ip.hover.lack=lack
+ip.hover.enough=enough
+ip.hover.preview=Show Preview: %s
+ip.hover.open=Right-click to configure

@@ -1,64 +1,120 @@
-This mod allows players to place an industrial platform which automatically fits the chunks of Minecraft game.
+# Industrial Platform（工业平台）
 
-Place the platform controller block where you want, then right click it with a wrench (or a stick) to open the
-**Platform Builder**.
+[![Build](https://github.com/YDHusky/IndustrialPlatform/actions/workflows/build.yml/badge.svg)](https://github.com/YDHusky/IndustrialPlatform/actions/workflows/build.yml)
 
-In the builder you can:
+一个面向 **Minecraft 1.12.2**（Forge）的完全自定义工业平台搭建器模组。
+放置搭建器方块、右键打开配置界面，选好材料、尺寸和偏移，一键生成整个平台——
+搭建动画逐块出现、材料自动从背包扣除，已就位的位置免费复用。
 
-- Adjust how many blocks are filled **upwards / downwards** with the number fields or the +/- buttons (0 ~ 64)
-- Choose the **style** (Industrial / Checkerboard) and the **size** (1x1 chunk / 3x3 chunks)
-- Put a **material** (any stone by default) into the slot, then press **Build**
+合成配方：
 
-The Build button stays grey until a valid material is in the slot. Materials left in the slot are given back to your
-inventory when the screen is closed.
+```
+ I S I
+ S R S     I = 铁锭, S = 石头, R = 红石
+ I S I
+```
 
-The chunk boundary preview follows your selection. While the builder is open, the preview of the block you are editing
-updates immediately: a wireframe box (vanilla hitbox style) frames everything that will be touched, its footprint
-switches between 1x1 and 3x3 chunks and its height follows the fill values. A translucent plane marks the layer the platform itself will be placed on. Every platform block keeps its
-own settings in the world save, so closing the screen, walking away or reloading the world does not lose them.
+## 功能一览
 
-We provide 5 kinds of platform:
+- **4 种材料自定义**：边框方块 / 填充方块 / 道路材料 / 中心方块，点击列表在全局方块
+  选择器中挑选（可搜索、可切换「背包」页签一键选中，支持数据值/meta 变体）
+- **尺寸与网格**：块大小、平面数量 X/Z（1~8）、道路宽——一台搭建器直接生成
+  2x2 / 3x3 合体大平台，格间自动铺路
+- **锚点固定**：平台以搭建器所在**区块中心**为锚点生成，后期扩建（改尺寸/数量）
+  始终围绕同一个中心向外扩展，机器不用挪
+- **三轴偏移**：偏移 X / Y / Z（±64）微调平台落点，配置存在方块里，机器不拆永久保留
+- **材料逻辑**：目标位置已是正确方块 → 复用不消耗；是别的方块 → 由「替换方块」开关决定
+  替换并计费或保留跳过；基岩、容器、搭建器本体永不破坏
+- **材料清单**：悬停搭建按钮 / 准星指向搭建器时显示完整清单，并对照背包标出够/缺
+- **全息预览**：世界内半透明幽灵方块 + 体积线框，差异视图（只显示将要改变的位置），
+  配置界面打开、准星悬停均可触发；「预览显示」开关存在方块里可常驻
+- **搭建动画**：方块从下往上、从中心向外波纹式出现，带粒子效果，速度自适应，
+  抑制光照更新不卡顿，完成后自动收起全息
+- **俯视预览**：GUI 内 3D 等距方块预览（可拖动旋转）+ 右侧实时材料清单
+- **KubeJS 风格蓝图**：用 JS 脚本或 JSON 注册预设，界面内循环套用、热加载
 
-Light Industrial Platform (1x1 chunks, made by concrete and deepslate tiles)
+## 使用方法
 
-Heavy Industrial Platform (3x3 chunks, made by concrete and deepslate tiles)
+1. 合成并放置**工业平台搭建器**。
+2. 右键打开「平台配置」界面：
+   - 左上：4 行材料，点击挑选方块（选择器内可切「背包」页签直接选）；
+   - 右上：块大小、平面数量 X/Z、道路宽；
+   - 左下「偏移」分组框：偏移 X / Y / Z；
+   - 右下：预览显示、替换方块开关，蓝图循环，预览按钮，搭建主按钮。
+3. 点 **搭建**。生存模式会校验材料（不够时按钮变灰并在悬停/聊天栏提示缺货），
+   创造模式不消耗。
+4. 配置随方块保存，关界面、走开、重进世界都不丢。
 
-Light Checkerboard Platform (1x1 chunks, made by concrete with clear block edges)
+## 网格搭建（2x2 / 3x3）
 
-Heavy Checkerboard Platform (3x3 chunks, made by concrete with clear block edges)
+把「平面数量 X/Z」设成 2 或 2x2、3x3，一台搭建器一次生成整片：
+每格都是完整平台（边框环 + 填充内部 + 中心块），格间由**道路宽**指定纯路面宽度
+（边框不算路宽，每侧额外 1 格边框），路面用「道路材料」铺设。
+材料一张账单结算，全息预览与实际生成共用同一份布局代码，所见即所得。
 
-Infinity Fluid Pool (1x1 chunks, 62 blocks deep to create enough space for Create infinity Fluid)
+## KubeJS 风格蓝图
 
-Right click the fluid pool with any stone to deploy it
+脚本放到以下任一目录即可（**不需要安装 KubeJS**——由 1.12.2 自带的 Nashorn 引擎执行）：
 
----
+- `kubejs/startup_scripts/industrial_platform/*.js`
+- `config/industrial_platform/blueprints/*.js`（同目录 `*.json` 预设也支持）
 
-本模组提供了一个自动对齐区块的便携工业平台
+```js
+blueprints.register({
+    name: "玻璃观景台",
+    border: "minecraft:iron_block",
+    fill: "minecraft:glass",
+    center: "minecraft:sea_lantern",
+    link: "minecraft:quartz_block",
+    intervalX: 20, intervalZ: 20,
+    countX: 2, countZ: 2,
+    linkWidth: 3,
+    channelWidth: 1, channelMode: "HORSESHOE"
+});
+```
 
-把平台方块放在想要展开的位置, 手持扳手 (或木棍)右键即可打开 **平台搭建界面**
+- 界面内「蓝图」按钮循环套用，「刷新蓝图」热加载，或 `/ipblueprints reload|list`
+- 示例见 `examples/` 目录
 
-在界面里可以:
+### 蓝图字段
 
-- 用数字输入框或加减号按钮调整 **向上 / 向下填充的格数**(0 ~ 64)
-- 选择平台的 **样式**(工业 / 棋盘格)与 **尺寸**(1×1 区块 / 3×3 区块)
-- 往槽位里放入 **材料**(默认为任意石头), 然后点击 **搭建**
+| 字段 | 含义 |
+| --- | --- |
+| `border` `fill` `center` `link` `boundary` `body` `edge` `channelLine` `centerMarkBlock` | 方块引用 `modid:block[:meta]` |
+| `layers` `intervalX` `intervalZ` `countX` `countZ` `linkWidth` `channelWidth` | 数值 |
+| `offsetX` `offsetZ` `offsetY` | 锚点偏移（±64） |
+| `channelMode` | `NONE` / `STRAIGHT` / `HORSESHOE` |
+| `centerMark` `replaceExisting` | 布尔 |
 
-槽位里没有材料时搭建按钮是灰色的。关闭界面时, 还留在槽位里的材料会退回背包。
+## 构建方法
 
-区块边界预览会跟着你的选择走: 界面打开时, 正在编辑的那个平台的预览立刻变化 —— 用原版碰撞箱那种线框立方体把会被处理的体积框起来,
-底面在 1×1 / 3×3 区块之间切换, 高度跟着上下填充格数走;
-另外用一层半透明面标出平台自己会铺在哪一层。预览统一用蓝色。 每个平台方块都会把自己的搭建设置存进存档, 关掉界面、走开、甚至重进游戏都不会丢。
+代码目标 Java 8，但 ForgeGradle 2.3 的环境搭建任务依赖 Pack200，
+**请用 JDK 8~13 运行 Gradle**（推荐 Temurin 11；JDK 14+ 会在
+`applyBinaryPatches` 处报 `java/util/jar/Pack200` 错误）。
 
-总共提供5种平台:
+```bash
+export JAVA_HOME=/path/to/jdk-11
+./gradlew build
+```
 
-轻型工业平台（1x1区块，由混凝土与深板岩瓦组成）
+首次构建会下载 Forge 与 MCP 映射，如需代理：
 
-重型工业平台（3x3区块，由混凝土与深板岩瓦组成）
+```bash
+GRADLE_OPTS="-Dhttp.proxyHost=127.0.0.1 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7897" ./gradlew build
+```
 
-轻型棋盘格平台（1x1区块，由黄黑白浅灰四种混凝土组成）
+产物在 `build/libs/`。GitHub Actions 会在每次推送时自动构建，打 `v*` 标签时自动发布 Release。
 
-重型棋盘格平台（3x3区块，由黄黑白浅灰四种混凝土组成）
+> 注意：FG2 工具链最高只能用 Forge `14.23.5.2847`——更新的 1.12.2 构建不再发布
+> 该工具链需要的 `userdev` 构件。
 
-无限流体池（1x1区块，62格深，共12152方块空位用于制造机械动力无限流体池）
+## Cleanroom 兼容性
 
-手持任意石头右键流体池即可展开
+本模组兼容 [Cleanroom](https://github.com/CleanroomMC/Cleanroom) 加载器
+（渲染层已做 GL 状态加固：push/popAttrib 兜底、显式状态归一化）。
+将构建出的 jar 直接放入 Cleanroom 实例的 `mods/` 文件夹即可。
+Cleanroom 开发环境的搭建尝试与结论见 `docs/cleanroom-dev-setup.md`。
+
+## 许可证
+
+GNU LGPLv3

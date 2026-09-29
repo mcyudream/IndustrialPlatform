@@ -1,0 +1,17 @@
+{
+  "name": "重型工业平台",
+  "border": "minecraft:stonebrick",
+  "fill": "minecraft:stone",
+  "center": "minecraft:iron_block",
+  "boundary": "minecraft:concrete:4",
+  "body": "minecraft:cobblestone",
+  "edge": "minecraft:stonebrick",
+  "channelLine": "minecraft:glowstone",
+  "centerMarkBlock": "minecraft:gold_block",
+  "layers": 3,
+  "intervalX": 30,
+  "intervalZ": 30,
+  "channelWidth": 3,
+  "channelMode": "STRAIGHT",
+  "centerMark": false
+}

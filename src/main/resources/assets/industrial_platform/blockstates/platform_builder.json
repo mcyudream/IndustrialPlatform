@@ -1,7 +1,7 @@
 {
-	"variants": {
-		"": {
-			"model": "industrial_platform:block/platform_builder"
-		}
-	}
+  "variants": {
+    "normal": {
+      "model": "industrial_platform:platform_builder"
+    }
+  }
 }

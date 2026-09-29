@@ -1,6 +1,6 @@
 {
-	"pack": {
-		"description": "industrial_platform resources",
-		"pack_format": 15
-	}
+  "pack": {
+    "pack_format": 3,
+    "description": "Industrial Platform resources"
+  }
 }

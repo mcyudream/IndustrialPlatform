@@ -1,37 +1,70 @@
 package dev.celestiacraft.industrialplatform;
 
-import net.minecraft.resources.ResourceLocation;
-import net.minecraftforge.eventbus.api.IEventBus;
+import dev.celestiacraft.industrialplatform.blueprint.BlueprintLibrary;
+import dev.celestiacraft.industrialplatform.command.CommandBlueprints;
+import dev.celestiacraft.industrialplatform.network.PacketConfig;
+import dev.celestiacraft.industrialplatform.proxy.CommonProxy;
+import dev.celestiacraft.industrialplatform.registry.IPCreativeTab;
+import dev.celestiacraft.industrialplatform.tile.TilePlatformBuilder;
+import net.minecraft.creativetab.CreativeTabs;
+import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.config.ModConfig;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import org.apache.logging.log4j.LogManager;
+import net.minecraftforge.fml.common.SidedProxy;
+import net.minecraftforge.fml.common.event.FMLInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLServerStartingEvent;
+import net.minecraftforge.fml.common.network.NetworkRegistry;
+import net.minecraftforge.fml.common.network.simpleimpl.SimpleNetworkWrapper;
+import net.minecraftforge.fml.common.registry.GameRegistry;
+import net.minecraftforge.fml.relauncher.Side;
 import org.apache.logging.log4j.Logger;
-import dev.celestiacraft.industrialplatform.common.register.IPBlocks;
-import dev.celestiacraft.industrialplatform.config.CommonConfig;
-import dev.celestiacraft.industrialplatform.common.register.IPItems;
-import dev.celestiacraft.industrialplatform.common.register.IPMenus;
-import dev.celestiacraft.industrialplatform.network.IPNetwork;
 
-@Mod(IndustrialPlatform.MODID)
+/**
+ * Industrial Platform — chunk-independent, fully configurable platform builder for 1.12.2.
+ *
+ * Border / fill / center blocks, the platform footprint and every material are chosen
+ * in the builder GUI; blueprints can be registered from KubeJS-style javascript files.
+ */
+@Mod(modid = IndustrialPlatform.MODID, name = IndustrialPlatform.NAME, version = IndustrialPlatform.VERSION,
+        acceptedMinecraftVersions = "[1.12,1.13)", dependencies = "after:kubejs;after:create")
 public class IndustrialPlatform {
-	public static final String MODID = "industrial_platform";
-	public static final String NAME = "Industrial Platform";
-	public static final Logger LOGGER = LogManager.getLogger(NAME);
 
-	public static ResourceLocation loadResource(String path) {
-		return ResourceLocation.fromNamespaceAndPath(MODID, path);
-	}
+    public static final String MODID = "industrial_platform";
+    public static final String NAME = "Industrial Platform";
+    public static final String VERSION = "2.1.0";
 
-	public IndustrialPlatform(FMLJavaModLoadingContext context) {
-		IEventBus bus = context.getModEventBus();
+    @SidedProxy(clientSide = "dev.celestiacraft.industrialplatform.proxy.ClientProxy",
+            serverSide = "dev.celestiacraft.industrialplatform.proxy.CommonProxy")
+    public static CommonProxy proxy;
 
-		context.registerConfig(ModConfig.Type.COMMON, CommonConfig.SPEC, "nebula/" + MODID + "/common.toml");
+    public static final CreativeTabs CREATIVE_TAB = new IPCreativeTab();
 
-		IPBlocks.register(bus);
-		IPItems.register(bus);
-		IPMenus.register(bus);
+    public static SimpleNetworkWrapper NETWORK;
+    public static Logger LOGGER;
 
-		IPNetwork.register();
-	}
+    @Mod.EventHandler
+    public void preInit(FMLPreInitializationEvent event) {
+        LOGGER = event.getModLog();
+
+        NETWORK = NetworkRegistry.INSTANCE.newSimpleChannel(MODID);
+        NETWORK.registerMessage(PacketConfig.Handler.class, PacketConfig.class, 0, Side.SERVER);
+        NETWORK.registerMessage(dev.celestiacraft.industrialplatform.network.PacketBuildComplete.Handler.class,
+                dev.celestiacraft.industrialplatform.network.PacketBuildComplete.class, 1, Side.CLIENT);
+
+        GameRegistry.registerTileEntity(TilePlatformBuilder.class,
+                new ResourceLocation(MODID, "platform_builder"));
+
+        proxy.preInit(event);
+    }
+
+    @Mod.EventHandler
+    public void init(FMLInitializationEvent event) {
+        proxy.init(event);
+    }
+
+    @Mod.EventHandler
+    public void serverStarting(FMLServerStartingEvent event) {
+        event.registerServerCommand(new CommandBlueprints());
+        BlueprintLibrary.load(event.getServer().getDataDirectory());
+    }
 }
