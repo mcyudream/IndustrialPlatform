@@ -47,7 +47,9 @@ public final class MaterialScanner {
             }
             for (int z = 0; z < layout.sizeZ; z++) {
                 for (int x = 0; x < layout.sizeX; x++) {
-                    BlockRef ref = cfg.get(layout.roleAt(layer, x, z));
+                    BlockRef ref = layer == cfg.layers - 1
+                            ? layout.surfaceRefAt(x, z)
+                            : cfg.get(layout.roleAt(layer, x, z));
                     if (ref.isAir()) {
                         continue;
                     }
@@ -64,35 +66,19 @@ public final class MaterialScanner {
                 }
             }
         }
-        // center blocks billed independently of the role logic (see PlatformGenerator);
-        // the builder's own center cell is excluded (it IS the center there)
-        BlockRef center = cfg.get(PlatformRole.CENTER);
-        if (!center.isAir()) {
-            int surfaceY = y0 + cfg.layers - 1;
-            if (surfaceY <= 255) {
-                int periodX = layout.cellX + layout.gap;
-                int periodZ = layout.cellZ + layout.gap;
-                for (int gi = 0; gi < layout.countX; gi++) {
-                    for (int gj = 0; gj < layout.countZ; gj++) {
-                        for (int lz = 0; lz < layout.cellZ; lz++) {
-                            for (int lx = 0; lx < layout.cellX; lx++) {
-                                if (!layout.isCenterCell(lx, lz, layout.cellX, layout.cellZ)) {
-                                    continue;
-                                }
-                                BlockPos pos = new BlockPos(x0 + gi * periodX + lx, surfaceY, z0 + gj * periodZ + lz);
-                                if (pos.equals(new BlockPos(anchorX, surfaceY, anchorZ))) {
-                                    continue;
-                                }
-                                IBlockState current = world.getBlockState(pos);
-                                if (current.getBlock() == center.block
-                                        && current.getBlock().getMetaFromState(current) == center.meta) {
-                                    continue;
-                                }
-                                Integer old = counts.get(center);
-                                counts.put(center, old == null ? 1 : old + 1);
-                            }
-                        }
+        // auto-torch option billed like the generator places them
+        if (cfg.autoTorches) {
+            BlockRef torch = new BlockRef(net.minecraft.init.Blocks.TORCH, 0);
+            int torchY = y0 + cfg.layers;
+            if (torchY <= 255) {
+                for (int[] spot : layout.torchSpots()) {
+                    BlockPos pos = new BlockPos(x0 + spot[0], torchY, z0 + spot[1]);
+                    IBlockState current = world.getBlockState(pos);
+                    if (current.getBlock() == net.minecraft.init.Blocks.TORCH) {
+                        continue;
                     }
+                    Integer old = counts.get(torch);
+                    counts.put(torch, old == null ? 1 : old + 1);
                 }
             }
         }

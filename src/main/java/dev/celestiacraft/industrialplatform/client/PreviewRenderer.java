@@ -6,45 +6,64 @@ import dev.celestiacraft.industrialplatform.config.BlockRef;
 import dev.celestiacraft.industrialplatform.config.PlatformConfig;
 import dev.celestiacraft.industrialplatform.platform.PlatformLayout;
 import dev.celestiacraft.industrialplatform.platform.PlatformRole;
-import dev.celestiacraft.industrialplatform.tile.TilePlatformBuilder;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.BlockRendererDispatcher;
 import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.renderer.Tessellator;
-import net.minecraft.client.renderer.tileentity.TileEntityRendererDispatcher;
+import net.minecraft.client.renderer.texture.TextureMap;
 import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.entity.player.EntityPlayer;
-import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.RayTraceResult;
 import net.minecraft.util.math.Vec3d;
+import net.minecraftforge.client.MinecraftForgeClient;
 import net.minecraftforge.client.event.RenderWorldLastEvent;
+import net.minecraftforge.client.ForgeHooksClient;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.relauncher.Side;
+import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL14;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * In-world hologram, Building Gadgets style: translucent block ghosts rendered
- * without depth writes (visible through terrain) at their exact build positions,
- * plus a wireframe volume. Shows while the config screen is open, while aiming
- * at a builder, or persistently when the builder's "show preview" toggle is on.
+ * In-world hologram preview.
  *
- * Ghost blocks use BlockRendererDispatcher.renderBlockWithout — the same
- * "render a translucent block ghost regardless of occlusion" primitive Building
- * Gadgets uses on 1.12.2.
+ * The rendering recipe is ported verbatim from Building Gadgets 2.8.4
+ * (ToolRenders#renderBuilderOverlay), which is proven to display correctly on
+ * the Cleanroom + OptiFine + StellarCore stack used by target modpacks. The
+ * three essential ingredients our first implementation was missing:
+ *
+ * <ul>
+ *   <li>explicitly binding {@link TextureMap#LOCATION_BLOCKS_TEXTURE} before
+ *       any ghost rendering;</li>
+ *   <li>the {@code rotate(-90°, 0, 1, 0)} prerequisite of
+ *       {@code renderBlockBrightness} — without it every face is culled and
+ *       the ghosts are simply invisible;</li>
+ *   <li>{@code blendFunc(CONSTANT_COLOR, CONSTANT_ALPHA)} with
+ *       {@link GL14#glBlendColor} driving the translucency.</li>
+ * </ul>
+ *
+ * Registered via {@code @Mod.EventBusSubscriber} (see {@link ClientModels} for
+ * why explicit registration is not usable on the Cleanroom core); the builder
+ * config resolves through {@link ClientConfigCache} so a flaky client-side
+ * tile entity can't kill the hologram.
  */
 @Mod.EventBusSubscriber(modid = IndustrialPlatform.MODID, value = Side.CLIENT)
 public final class PreviewRenderer {
+
+    /** Keep ghost counts bounded; huge platforms render their surface only. */
+    private static final int MAX_GHOSTS = 16384;
 
     public static boolean active;
     public static BlockPos pos;
     public static PlatformConfig cfg;
 
-    private PreviewRenderer() {
+    private static boolean firedLog;
+
+    public PreviewRenderer() {
     }
 
     @SubscribeEvent
@@ -52,6 +71,11 @@ public final class PreviewRenderer {
         Minecraft mc = Minecraft.getMinecraft();
         if (mc.world == null || mc.player == null) {
             return;
+        }
+        ModelHealer.ensureHealed(mc);
+        if (!firedLog) {
+            firedLog = true;
+            IndustrialPlatform.LOGGER.info("[IP] RenderWorldLast handler alive");
         }
 
         BlockPos target = null;
@@ -61,12 +85,22 @@ public final class PreviewRenderer {
             target = pos;
             targetCfg = cfg;
         } else {
+            // a persistent preview must die with its builder — breakBlock clears
+            // the statics, but world edits / chunk edge cases can slip past it
+            if (pos != null && !(mc.world.getBlockState(pos).getBlock() instanceof PlatformBuilderBlock)) {
+                IndustrialPlatform.LOGGER.info("[IP] persistent preview dropped: builder at {} is gone", pos);
+                ClientConfigCache.forget(pos);
+                active = false;
+                pos = null;
+                cfg = null;
+            }
             BlockPos hovered = hoveredBuilder(mc);
             if (hovered != null) {
-                TileEntity te = mc.world.getTileEntity(hovered);
-                if (te instanceof TilePlatformBuilder) {
-                    target = hovered;
-                    targetCfg = ((TilePlatformBuilder) te).getConfig();
+                targetCfg = ClientConfigCache.resolve(mc.world, hovered);
+                target = targetCfg != null ? hovered : null;
+                if (targetCfg == null) {
+                    // no TE, no cache: ask the authoritative server once
+                    ClientSyncer.maybeRequest(hovered);
                 }
             }
             if (target == null && pos != null && cfg != null && cfg.previewOn) {
@@ -99,12 +133,12 @@ public final class PreviewRenderer {
         config.clamp();
         PlatformLayout layout = new PlatformLayout(config);
 
-        // RenderWorldLast's modelview is relative to the player's FEET (not the
-        // eyes) — using the eye position made the hologram sink ~1.6 blocks.
-        Vec3d cam = new Vec3d(
-                player.lastTickPosX + (player.posX - player.lastTickPosX) * partialTicks,
-                player.lastTickPosY + (player.posY - player.lastTickPosY) * partialTicks,
-                player.lastTickPosZ + (player.posZ - player.lastTickPosZ) * partialTicks);
+        // Building Gadgets uses the interpolated FEET position — RenderWorldLast's
+        // modelview is feet-relative (eye position sinks the hologram ~1.6 blocks).
+        Vec3d playerPos = new Vec3d(
+                player.prevPosX + (player.posX - player.prevPosX) * partialTicks,
+                player.prevPosY + (player.posY - player.prevPosY) * partialTicks,
+                player.prevPosZ + (player.posZ - player.prevPosZ) * partialTicks);
 
         int anchorX = (pos.getX() >> 4) * 16 + 8 + config.offsetX;
         int anchorZ = (pos.getZ() >> 4) * 16 + 8 + config.offsetZ;
@@ -112,167 +146,111 @@ public final class PreviewRenderer {
         int z0 = anchorZ - layout.centerZ;
         int y0 = Math.max(0, Math.min(255, pos.getY() + config.offsetY));
         int y1 = Math.min(255, y0 + config.layers);
+        int surfaceY = y1 - 1;
 
-        double minX = x0;
-        double maxX = x0 + layout.sizeX;
-        double minZ = z0;
-        double maxZ = z0 + layout.sizeZ;
+        // surface cells to ghost — surfaceRefAt includes the center overlay, so
+        // the hologram shows exactly what the generator builds. The builder's
+        // own block is never ghosted.
+        List<BlockRefCell> cells = new ArrayList<BlockRefCell>();
+        for (int z = 0; z < layout.sizeZ && cells.size() < MAX_GHOSTS; z++) {
+            for (int x = 0; x < layout.sizeX && cells.size() < MAX_GHOSTS; x++) {
+                BlockRef ref = layout.surfaceRefAt(x, z);
+                if (ref.isAir()) {
+                    continue;
+                }
+                BlockPos cell = new BlockPos(x0 + x, surfaceY, z0 + z);
+                if (cell.equals(pos)) {
+                    continue;
+                }
+                cells.add(new BlockRefCell(cell, ref));
+            }
+        }
+        if (config.autoTorches && surfaceY + 1 <= 255) {
+            BlockRef torch = new BlockRef(net.minecraft.init.Blocks.TORCH, 0);
+            for (int[] spot : layout.torchSpots()) {
+                if (cells.size() >= MAX_GHOSTS) {
+                    break;
+                }
+                cells.add(new BlockRefCell(new BlockPos(x0 + spot[0], surfaceY + 1, z0 + spot[1]), torch));
+            }
+        }
 
+        // ---- Building Gadgets 2.8.4 ghost recipe (ToolRenders#renderBuilderOverlay) ----
+        mc.getTextureManager().bindTexture(TextureMap.LOCATION_BLOCKS_TEXTURE);
         GlStateManager.pushMatrix();
-        GlStateManager.pushAttrib();
-        GlStateManager.translate(-cam.x, -cam.y, -cam.z);
-        // Cleanroom's LWJGL3 stack is strict about leaked GL state — normalize
-        // everything our render relies on before touching the depth/blend paths
-        GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
-        GlStateManager.enableTexture2D();
-        GlStateManager.disableLighting();
-        GlStateManager.disableCull();
-
-        Tessellator tessellator = Tessellator.getInstance();
-        BufferBuilder buffer = tessellator.getBuffer();
-
-        // ---- ghost blocks (Building Gadgets recipe) ----
-        // translucent, no depth writes, full brightness, so ghosts are visible
-        // through terrain and never z-fight with real blocks
         GlStateManager.enableBlend();
-        GlStateManager.tryBlendFuncSeparate(GlStateManager.SourceFactor.SRC_ALPHA,
-                GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA, GlStateManager.SourceFactor.ONE,
-                GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA);
-        GlStateManager.depthMask(false);
-        // depth test stays enabled — ghosts show through terrain thanks to blend
-        // without depth writes, but still occlude correctly in front
-        GlStateManager.enableDepth();
+        GlStateManager.blendFunc(32771, 32772); // CONSTANT_COLOR, CONSTANT_ALPHA
 
-        Map<BlockPos, BlockRef> pending = new LinkedHashMap<BlockPos, BlockRef>();
-        if (layout.sizeX * layout.sizeZ <= 4096) {
-            for (int z = 0; z < layout.sizeZ; z++) {
-                for (int x = 0; x < layout.sizeX; x++) {
-                    PlatformRole role = layout.roleAt(config.layers - 1, x, z);
-                    BlockRef ref = config.get(role);
-                    if (ref.isAir()) {
-                        continue;
-                    }
-                    BlockPos cell = new BlockPos(x0 + x, y1 - 1, z0 + z);
-                    if (cell.equals(pos)) {
-                        continue; // the builder block itself is never ghosted
-                    }
-                    pending.put(cell, ref);
-                }
-            }
-        } else {
-            // huge platforms: surface pattern quads instead
-            GlStateManager.enableDepth();
-            GlStateManager.disableCull();
-            buffer.begin(7, DefaultVertexFormats.POSITION_COLOR);
-            long time = System.currentTimeMillis();
-            float pulse = 0.24F + 0.10F * (float) Math.sin(time * 0.004);
-            for (int z = 0; z < layout.sizeZ; z++) {
-                for (int x = 0; x < layout.sizeX; x++) {
-                    PlatformRole role = layout.roleAt(config.layers - 1, x, z);
-                    if (config.get(role).isAir()) {
-                        continue;
-                    }
-                    float[] rgb = roleColor(role);
-                    cell(buffer, x0 + x, y1 + 0.03D, z0 + z, rgb[0], rgb[1], rgb[2], pulse);
-                }
-            }
-            tessellator.draw();
-            GlStateManager.enableCull();
+        float ghostAlpha = 0.42F + 0.10F * (float) Math.sin(System.currentTimeMillis() * 0.003);
+        for (BlockRefCell cell : cells) {
+            GlStateManager.pushMatrix();
+            GlStateManager.translate(cell.pos.getX() - playerPos.x, cell.pos.getY() - playerPos.y, cell.pos.getZ() - playerPos.z);
+            GlStateManager.rotate(-90.0F, 0.0F, 1.0F, 0.0F);
+            GlStateManager.scale(1.0F, 1.0F, 1.0F);
+            GL14.glBlendColor(1.0F, 1.0F, 1.0F, ghostAlpha);
+            mc.getBlockRendererDispatcher().renderBlockBrightness(
+                    cell.ref.block.getStateFromMeta(cell.ref.meta), 1.0F);
+            GlStateManager.popMatrix();
         }
 
-        if (!pending.isEmpty()) {
-            // per-block GL translate + renderBlockBrightness: proven correct
-            // positioning. (Batched renderBlock requires buffer.setTranslation
-            // per cell — without it every ghost stacks at the buffer origin.)
-            GlStateManager.enableCull();
-            BlockRendererDispatcher dispatcher = mc.getBlockRendererDispatcher();
-            float ghostBrightness = 0.72F + 0.12F * (float) Math.sin(System.currentTimeMillis() * 0.004);
-            for (Map.Entry<BlockPos, BlockRef> entry : pending.entrySet()) {
-                BlockPos cell = entry.getKey();
-                GlStateManager.pushMatrix();
-                GlStateManager.translate(cell.getX(), cell.getY(), cell.getZ());
-                dispatcher.renderBlockBrightness(
-                        entry.getValue().block.getStateFromMeta(entry.getValue().meta), ghostBrightness);
-                GlStateManager.popMatrix();
-            }
-
-            // accent cap so pending cells read as "planned", never as broken blocks
-            GlStateManager.disableCull();
-            buffer.begin(7, DefaultVertexFormats.POSITION_COLOR);
-            float capAlpha = 0.30F + 0.10F * (float) Math.sin(System.currentTimeMillis() * 0.006);
-            for (BlockPos cell : pending.keySet()) {
-                cell(buffer, cell.getX(), cell.getY() + 1.002D, cell.getZ(), 0.31F, 0.71F, 1.0F, capAlpha);
-            }
-            tessellator.draw();
-            GlStateManager.enableCull();
-        }
-
-        GlStateManager.enableLighting();
-        GlStateManager.depthMask(true);
-        GlStateManager.disableBlend();
-        GlStateManager.enableTexture2D();
-
-        // ---- wireframe volume, visible through terrain ----
+        // ---- wireframe volume (Building Gadgets renderDestructionOverlay box recipe:
+        //      global translate by -playerPos, world coordinates, no texture) ----
+        double minX = x0, maxX = x0 + layout.sizeX;
+        double minZ = z0, maxZ = z0 + layout.sizeZ;
+        double bottom = y0 + 0.03D, top = y1 - 1 + 0.03D;
+        GlStateManager.pushMatrix();
+        GlStateManager.translate(-playerPos.x, -playerPos.y, -playerPos.z);
+        GlStateManager.disableLighting();
         GlStateManager.disableTexture2D();
         GlStateManager.enableBlend();
         GlStateManager.tryBlendFuncSeparate(GlStateManager.SourceFactor.SRC_ALPHA,
                 GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA, GlStateManager.SourceFactor.ONE,
                 GlStateManager.DestFactor.ZERO);
-        GlStateManager.disableDepth();
         GlStateManager.glLineWidth(2.0F);
-        double bottom = y0 + 0.03D;
-        double top = y1 - 1 + 0.03D;
-        buffer.begin(1, DefaultVertexFormats.POSITION_COLOR);
-        float r = 0.25F, g = 0.78F, b = 1.0F, a = 0.55F;
-        edge(buffer, minX, bottom, minZ, maxX, bottom, minZ, r, g, b, a);
-        edge(buffer, maxX, bottom, minZ, maxX, bottom, maxZ, r, g, b, a);
-        edge(buffer, maxX, bottom, maxZ, minX, bottom, maxZ, r, g, b, a);
-        edge(buffer, minX, bottom, maxZ, minX, bottom, minZ, r, g, b, a);
-        edge(buffer, minX, top, minZ, maxX, top, minZ, r, g, b, 0.95F);
-        edge(buffer, maxX, top, minZ, maxX, top, maxZ, r, g, b, 0.95F);
-        edge(buffer, maxX, top, maxZ, minX, top, maxZ, r, g, b, 0.95F);
-        edge(buffer, minX, top, maxZ, minX, top, minZ, r, g, b, 0.95F);
-        edge(buffer, minX, y0, minZ, minX, y1, minZ, r, g, b, a);
-        edge(buffer, maxX, y0, minZ, maxX, y1, minZ, r, g, b, a);
-        edge(buffer, maxX, y0, maxZ, maxX, y1, maxZ, r, g, b, a);
-        edge(buffer, minX, y0, maxZ, minX, y1, maxZ, r, g, b, a);
+        Tessellator tessellator = Tessellator.getInstance();
+        BufferBuilder buffer = tessellator.getBuffer();
+        buffer.begin(GL11.GL_LINES, DefaultVertexFormats.POSITION_COLOR);
+        float r = 0.25F, g = 0.78F, b = 1.0F;
+        edge(buffer, minX, bottom, minZ, maxX, bottom, minZ, r, g, b);
+        edge(buffer, maxX, bottom, minZ, maxX, bottom, maxZ, r, g, b);
+        edge(buffer, maxX, bottom, maxZ, minX, bottom, maxZ, r, g, b);
+        edge(buffer, minX, bottom, maxZ, minX, bottom, minZ, r, g, b);
+        edge(buffer, minX, top, minZ, maxX, top, minZ, r, g, b);
+        edge(buffer, maxX, top, minZ, maxX, top, maxZ, r, g, b);
+        edge(buffer, maxX, top, maxZ, minX, top, maxZ, r, g, b);
+        edge(buffer, minX, top, maxZ, minX, top, minZ, r, g, b);
+        edge(buffer, minX, y0, minZ, minX, y1, minZ, r, g, b);
+        edge(buffer, maxX, y0, minZ, maxX, y1, minZ, r, g, b);
+        edge(buffer, maxX, y0, maxZ, maxX, y1, maxZ, r, g, b);
+        edge(buffer, minX, y0, maxZ, minX, y1, maxZ, r, g, b);
         tessellator.draw();
-
-        GlStateManager.enableDepth();
-        GlStateManager.enableCull();
+        GlStateManager.glLineWidth(1.0F);
+        GlStateManager.enableLighting();
         GlStateManager.enableTexture2D();
         GlStateManager.disableBlend();
-        GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
-        GlStateManager.popAttrib();
+        GlStateManager.enableDepth();
+        GlStateManager.popMatrix();
+
+        // ---- restore (exactly what Building Gadgets restores, in the same order) ----
+        GlStateManager.blendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
+        ForgeHooksClient.setRenderLayer(MinecraftForgeClient.getRenderLayer());
+        GlStateManager.disableBlend();
         GlStateManager.popMatrix();
     }
 
-    private static float[] roleColor(PlatformRole role) {
-        switch (role) {
-            case BORDER: return new float[]{0.78F, 0.81F, 0.86F};
-            case FILL: return new float[]{0.38F, 0.52F, 0.72F};
-            case CENTER: return new float[]{0.90F, 0.93F, 0.97F};
-            case BOUNDARY: return new float[]{1.0F, 0.83F, 0.28F};
-            case LINK: return new float[]{0.35F, 0.85F, 0.65F};
-            case BODY: return new float[]{0.33F, 0.38F, 0.46F};
-            case EDGE: return new float[]{0.55F, 0.62F, 0.72F};
-            case CHANNEL_LINE: return new float[]{1.0F, 0.70F, 0.22F};
-            case CENTER_MARK: return new float[]{1.0F, 0.86F, 0.25F};
-            default: return new float[]{0.6F, 0.6F, 0.6F};
+    private static final class BlockRefCell {
+        final BlockPos pos;
+        final BlockRef ref;
+
+        BlockRefCell(BlockPos pos, BlockRef ref) {
+            this.pos = pos;
+            this.ref = ref;
         }
     }
 
-    private static void cell(BufferBuilder buffer, double x, double y, double z,
-                             float r, float g, float b, float a) {
-        buffer.pos(x, y, z).color(r, g, b, a).endVertex();
-        buffer.pos(x + 1, y, z).color(r, g, b, a).endVertex();
-        buffer.pos(x + 1, y, z + 1).color(r, g, b, a).endVertex();
-        buffer.pos(x, y, z + 1).color(r, g, b, a).endVertex();
-    }
-
     private static void edge(BufferBuilder buffer, double x1, double ya, double z1,
-                             double x2, double yb, double z2, float r, float g, float b, float a) {
-        buffer.pos(x1, ya, z1).color(r, g, b, a).endVertex();
-        buffer.pos(x2, yb, z2).color(r, g, b, a).endVertex();
+                             double x2, double yb, double z2, float r, float g, float b) {
+        buffer.pos(x1 - 0, ya, z1).color(r, g, b, 1.0F).endVertex();
+        buffer.pos(x2, yb, z2).color(r, g, b, 1.0F).endVertex();
     }
 }

@@ -82,8 +82,9 @@ public final class PlatformGenerator {
             }
             for (int z = 0; z < layout.sizeZ; z++) {
                 for (int x = 0; x < layout.sizeX; x++) {
-                    PlatformRole role = layout.roleAt(layer, x, z);
-                    BlockRef ref = cfg.get(role);
+                    BlockRef ref = layer == cfg.layers - 1
+                            ? layout.surfaceRefAt(x, z)
+                            : cfg.get(layout.roleAt(layer, x, z));
                     if (ref.isAir()) {
                         continue;
                     }
@@ -106,44 +107,20 @@ public final class PlatformGenerator {
             }
         }
 
-        // center blocks are placed independently of the role logic, so a cell
-        // already holding the fill material can't swallow the center block.
-        // the builder block itself occupies one of the center cells — it IS that
-        // center, so it must be excluded from the plan or its cell would stay empty
-        BlockRef center = cfg.get(PlatformRole.CENTER);
-        if (!center.isAir()) {
-            int surfaceY = y0 + cfg.layers - 1;
-            if (surfaceY <= 255) {
-                int periodX = layout.cellX + layout.gap;
-                int periodZ = layout.cellZ + layout.gap;
-                for (int gi = 0; gi < layout.countX; gi++) {
-                    for (int gj = 0; gj < layout.countZ; gj++) {
-                        int baseX = gi * periodX;
-                        int baseZ = gj * periodZ;
-                        for (int lz = 0; lz < layout.cellZ; lz++) {
-                            for (int lx = 0; lx < layout.cellX; lx++) {
-                                if (!layout.isCenterCell(lx, lz, layout.cellX, layout.cellZ)) {
-                                    continue;
-                                }
-                                BlockPos pos = new BlockPos(x0 + baseX + lx, surfaceY, z0 + baseZ + lz);
-                                if (pos.equals(new BlockPos(anchorX, surfaceY, anchorZ))) {
-                                    continue; // the chunk center is reserved for the builder
-                                }
-                                IBlockState target = center.block.getStateFromMeta(center.meta);
-                                IBlockState current = world.getBlockState(pos);
-                                if (current == target) {
-                                    matched++;
-                                } else if (!canReplace(world, pos)) {
-                                    skipped++;
-                                    dev.celestiacraft.industrialplatform.IndustrialPlatform.LOGGER.info(
-                                            "Center cell {} SKIPPED (current={})", pos, current);
-                                } else {
-                                    placements.add(new Placement(pos, target));
-                                    dev.celestiacraft.industrialplatform.IndustrialPlatform.LOGGER.info(
-                                            "Center cell {} PLANNED (current={})", pos, current);
-                                }
-                            }
-                        }
+        // auto-torch option: standing torches on a light-based grid, one block
+        // above the surface, only into air / replaceable blocks
+        if (cfg.autoTorches) {
+            int torchY = y0 + cfg.layers;
+            if (torchY <= 255) {
+                IBlockState torch = Blocks.TORCH.getDefaultState();
+                for (int[] spot : layout.torchSpots()) {
+                    BlockPos pos = new BlockPos(x0 + spot[0], torchY, z0 + spot[1]);
+                    if (world.getBlockState(pos).getBlock() == Blocks.TORCH) {
+                        matched++;
+                    } else if (isSoftReplaceable(world.getBlockState(pos))) {
+                        placements.add(new Placement(pos, torch));
+                    } else {
+                        skipped++;
                     }
                 }
             }

@@ -34,7 +34,7 @@ public class CommandBlueprints extends CommandBase {
         }
         String sub = args[0].toLowerCase();
         if ("reload".equals(sub)) {
-            int count = BlueprintLibrary.load(server.getDataDirectory());
+            int count = BlueprintLibrary.load(server.getDataDirectory(), "command");
             sender.sendMessage(new TextComponentTranslation("ip.cmd.blueprints_loaded", count));
         } else if ("list".equals(sub)) {
             java.util.List<Blueprint> all = BlueprintLibrary.all();

@@ -14,8 +14,14 @@ import net.minecraft.util.math.MathHelper;
 public final class PlatformConfig {
 
     public BlockRef border = BlockRef.AIR;
+    /** Second border material, alternating with {@link #border} around the ring —
+     *  alternating colours make counting positions along an edge easy. */
+    public BlockRef border2 = BlockRef.AIR;
     public BlockRef fill = BlockRef.AIR;
     public BlockRef center = BlockRef.AIR;
+    /** Light block REPLACING the surface block at the four corners of each cell's
+     *  effective (interior) area. Glowstone by default; AIR = keep the normal block. */
+    public BlockRef corner = BlockRef.AIR;
     public BlockRef boundary = BlockRef.AIR;
     public BlockRef link = BlockRef.AIR;
     public BlockRef body = BlockRef.AIR;
@@ -56,13 +62,18 @@ public final class PlatformConfig {
     /** Keep the in-world hologram preview visible even with the GUI closed. */
     public boolean previewOn = false;
 
+    /** Auto-torch option: place standing torches on a light-based grid over the surface. */
+    public boolean autoTorches = false;
+
     public String blueprintName = "";
 
     public static PlatformConfig defaults() {
         PlatformConfig c = new PlatformConfig();
         c.border = orAir(BlockRef.parse("minecraft:stonebrick"));
+        c.border2 = orAir(BlockRef.parse("minecraft:double_stone_slab2"));
         c.fill = orAir(BlockRef.parse("minecraft:stone"));
         c.center = orAir(BlockRef.parse("minecraft:iron_block"));
+        c.corner = orAir(BlockRef.parse("minecraft:glowstone"));
         c.boundary = orAir(BlockRef.parse("minecraft:concrete:4"));
         c.link = BlockRef.AIR; // air = strips use the fill material
         c.body = orAir(BlockRef.parse("minecraft:cobblestone"));
@@ -80,8 +91,10 @@ public final class PlatformConfig {
         BlockRef ref;
         switch (role) {
             case BORDER: ref = border; break;
+            case BORDER2: ref = border2; break;
             case FILL: ref = fill; break;
             case CENTER: ref = center; break;
+            case CORNER: ref = corner; break;
             case BOUNDARY: ref = boundary; break;
             case LINK: ref = link; break;
             case BODY: ref = body; break;
@@ -97,8 +110,10 @@ public final class PlatformConfig {
         ref = ref == null ? BlockRef.AIR : ref;
         switch (role) {
             case BORDER: border = ref; break;
+            case BORDER2: border2 = ref; break;
             case FILL: fill = ref; break;
             case CENTER: center = ref; break;
+            case CORNER: corner = ref; break;
             case BOUNDARY: boundary = ref; break;
             case LINK: link = ref; break;
             case BODY: body = ref; break;
@@ -150,6 +165,7 @@ public final class PlatformConfig {
         tag.setBoolean("CenterMarkOn", centerMarkOn);
         tag.setBoolean("ReplaceExisting", replaceExisting);
         tag.setBoolean("PreviewOn", previewOn);
+        tag.setBoolean("AutoTorches", autoTorches);
         tag.setString("BlueprintName", blueprintName == null ? "" : blueprintName);
         return tag;
     }
@@ -178,6 +194,7 @@ public final class PlatformConfig {
         c.centerMarkOn = tag.getBoolean("CenterMarkOn");
         c.replaceExisting = tag.getBoolean("ReplaceExisting");
         c.previewOn = tag.getBoolean("PreviewOn");
+        c.autoTorches = tag.getBoolean("AutoTorches");
         c.blueprintName = tag.getString("BlueprintName");
         c.clamp();
         return c;
@@ -204,6 +221,7 @@ public final class PlatformConfig {
         o.addProperty("centerMarkOn", centerMarkOn);
         o.addProperty("replaceExisting", replaceExisting);
         o.addProperty("previewOn", previewOn);
+        o.addProperty("autoTorches", autoTorches);
         o.addProperty("blueprintName", blueprintName == null ? "" : blueprintName);
         return o;
     }
@@ -236,6 +254,7 @@ public final class PlatformConfig {
         c.centerMarkOn = getBoolean(o, "centerMarkOn", c.centerMarkOn);
         c.replaceExisting = getBoolean(o, "replaceExisting", c.replaceExisting);
         c.previewOn = getBoolean(o, "previewOn", c.previewOn);
+        c.autoTorches = getBoolean(o, "autoTorches", c.autoTorches);
         if (o.has("blueprintName") && o.get("blueprintName").isJsonPrimitive()) {
             c.blueprintName = o.get("blueprintName").getAsString();
         }

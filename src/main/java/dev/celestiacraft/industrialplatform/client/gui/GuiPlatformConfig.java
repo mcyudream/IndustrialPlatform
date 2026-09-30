@@ -38,7 +38,7 @@ import java.util.Map;
 public class GuiPlatformConfig extends GuiScreen {
 
     private static final int PANEL_W = 344;
-    private static final int PANEL_H = 212;
+    private static final int PANEL_H = 256;
 
     private static final int COL_A = 146;
     private static final int COL_B = 242;
@@ -47,7 +47,8 @@ public class GuiPlatformConfig extends GuiScreen {
 
     /** The only roles the simplified GUI exposes, in display order. */
     private static final PlatformRole[] GUI_ROLES = {
-            PlatformRole.BORDER, PlatformRole.FILL, PlatformRole.LINK, PlatformRole.CENTER
+            PlatformRole.BORDER, PlatformRole.BORDER2, PlatformRole.FILL, PlatformRole.LINK,
+            PlatformRole.CENTER, PlatformRole.CORNER
     };
 
     private static final int[] FIELD_MIN = {0, 1, 1, 0, -64, -64, -64};
@@ -57,7 +58,7 @@ public class GuiPlatformConfig extends GuiScreen {
     private PlatformConfig cfg;
 
     private final GuiTextField[] fields = new GuiTextField[7];
-    private GuiButton btnPreviewToggle, btnReplaceExisting, btnBlueprint, btnRefresh, btnPreview, btnBuild, btnDone;
+    private GuiButton btnPreviewToggle, btnReplaceExisting, btnBlueprint, btnRefresh, btnPreview, btnBuild, btnDone, btnTorches;
     private final GuiButton[] roleButtons = new GuiButton[GUI_ROLES.length];
 
     private int blueprintIndex = -1;
@@ -77,9 +78,9 @@ public class GuiPlatformConfig extends GuiScreen {
     @Override
     public void initGui() {
         if (cfg == null) {
-            TileEntity tile = mc.world.getTileEntity(pos);
-            PlatformConfig stored = tile instanceof TilePlatformBuilder
-                    ? ((TilePlatformBuilder) tile).getConfig() : null;
+            // live tile entity first, client-side cache as fallback (heavy
+            // optimization cores can make client TE lookups unreliable)
+            PlatformConfig stored = dev.celestiacraft.industrialplatform.client.ClientConfigCache.resolve(mc.world, pos);
             cfg = stored != null ? stored.copy() : PlatformConfig.defaults();
             cfg.clamp();
         }
@@ -100,9 +101,9 @@ public class GuiPlatformConfig extends GuiScreen {
         addField(px + COL_A, py + 66, 2);
         addField(px + COL_B, py + 66, 3);
         // offsets grouped in an inset panel on the bottom-left, labels inline
-        addField(px + 40, py + 122, 4);
-        addField(px + 40, py + 144, 5);
-        addField(px + 40, py + 166, 6);
+        addField(px + 40, py + 160, 4);
+        addField(px + 40, py + 182, 5);
+        addField(px + 40, py + 204, 6);
 
         btnPreviewToggle = addBtn(29, px + COL_A, py + 94, COL_W, 16);
         btnReplaceExisting = addBtn(30, px + COL_B, py + 94, COL_W, 16);
@@ -110,8 +111,8 @@ public class GuiPlatformConfig extends GuiScreen {
         btnRefresh = addBtn(25, px + COL_B, py + 114, COL_W, 16);
         btnPreview = addBtn(28, px + COL_A, py + 134, COL_W, 16);
         btnDone = addBtn(27, px + COL_B, py + 134, COL_W, 16);
-        btnBuild = addBtn(26, px + COL_A, py + 154, COL_B + COL_W - COL_A, 18);
-        ((DarkButton) btnBuild).primary = true;
+        btnTorches = addBtn(23, px + COL_A, py + 174, COL_W, 16);
+        btnBuild = addBtn(26, px + COL_A, py + 194, COL_B + COL_W - COL_A, 18);
         ((DarkButton) btnBuild).primary = true;
 
         refreshWidgets();
@@ -143,6 +144,8 @@ public class GuiPlatformConfig extends GuiScreen {
         }
         btnPreviewToggle.displayString = toggleLabel(I18n.format("ip.gui.preview_toggle"), cfg.previewOn);
         ((DarkButton) btnPreviewToggle).accent = cfg.previewOn;
+        btnTorches.displayString = toggleLabel(I18n.format("ip.gui.torches"), cfg.autoTorches);
+        ((DarkButton) btnTorches).accent = cfg.autoTorches;
         btnReplaceExisting.displayString = toggleLabel(I18n.format("ip.gui.replace"), cfg.replaceExisting);
         ((DarkButton) btnReplaceExisting).accent = cfg.replaceExisting;
         btnBlueprint.displayString = blueprintLabel();
@@ -273,12 +276,17 @@ public class GuiPlatformConfig extends GuiScreen {
                 btnReplaceExisting.displayString = toggleLabel(I18n.format("ip.gui.replace"), cfg.replaceExisting);
                 ((DarkButton) btnReplaceExisting).accent = cfg.replaceExisting;
                 break;
+            case 23:
+                cfg.autoTorches = !cfg.autoTorches;
+                btnTorches.displayString = toggleLabel(I18n.format("ip.gui.torches"), cfg.autoTorches);
+                ((DarkButton) btnTorches).accent = cfg.autoTorches;
+                break;
             case 24:
                 cycleBlueprint();
                 break;
             case 25:
                 blueprintIndex = -1;
-                int count = BlueprintLibrary.load(Minecraft.getMinecraft().gameDir);
+                int count = BlueprintLibrary.load(Minecraft.getMinecraft().gameDir, "gui-refresh");
                 setStatus(I18n.format("ip.cmd.blueprints_loaded", count), Theme.OK);
                 refreshWidgets();
                 break;
@@ -324,6 +332,14 @@ public class GuiPlatformConfig extends GuiScreen {
     }
 
     /** Called back by {@link GuiBlockPicker} after a block was selected. */
+    /** Server told us the build finished: drop the persistent preview locally too. */
+    public void onBuildCompleted(BlockPos builtPos) {
+        if (pos.equals(builtPos) && cfg != null && cfg.previewOn) {
+            cfg.previewOn = false;
+            refreshWidgets();
+        }
+    }
+
     void onRolePicked(PlatformRole role, BlockRef ref) {
         cfg.set(role, ref);
         setStatus(I18n.format("ip.gui.role_set", I18n.format(role.langKey()), ref.displayName()), Theme.OK);
@@ -332,16 +348,12 @@ public class GuiPlatformConfig extends GuiScreen {
     private void tryBuild() {
         syncFieldsToConfig();
         cfg.clamp();
-        if (!hasBuilder()) {
+        if (!builderKnown()) {
             setStatus(I18n.format("ip.gui.no_builder"), Theme.ERR);
             return;
         }
-        Map<BlockRef, Integer> bill = MaterialScanner.required(mc.world, pos, cfg);
-        Map<BlockRef, Integer> missing = MaterialScanner.missing(mc.player, bill);
-        if (!missing.isEmpty()) {
-            setStatus(I18n.format("ip.msg.missing_list", MaterialScanner.formatMissing(missing)), Theme.ERR);
-            return;
-        }
+        // material check happens server-side, which can also pull from adjacent
+        // containers and the AE2 network — the client only sees the inventory
         IndustrialPlatform.NETWORK.sendToServer(new PacketConfig(pos, cfg, true));
         setStatus(I18n.format("ip.msg.build_started"), Theme.OK);
     }
@@ -354,6 +366,11 @@ public class GuiPlatformConfig extends GuiScreen {
         return mc.world != null && mc.world.getTileEntity(pos) instanceof TilePlatformBuilder;
     }
 
+    /** Builder is usable when its TE is readable OR we hold a cached config for it. */
+    private boolean builderKnown() {
+        return hasBuilder() || dev.celestiacraft.industrialplatform.client.ClientConfigCache.known(pos);
+    }
+
     private void setStatus(String text, int color) {
         this.statusText = text == null ? "" : text;
         this.statusColor = color;
@@ -363,8 +380,11 @@ public class GuiPlatformConfig extends GuiScreen {
     public void onGuiClosed() {
         super.onGuiClosed();
         PreviewRenderer.active = false;
-        if (cfg != null && hasBuilder()) {
+        if (cfg != null) {
             syncFieldsToConfig();
+            // remember what the server is about to store, even if its TE check
+            // fails later on the client side
+            dev.celestiacraft.industrialplatform.client.ClientConfigCache.remember(pos, cfg);
             IndustrialPlatform.NETWORK.sendToServer(new PacketConfig(pos, cfg, false));
         }
     }
@@ -385,11 +405,11 @@ public class GuiPlatformConfig extends GuiScreen {
         drawRect(px + PANEL_W / 2 - 24, py + 16, px + PANEL_W / 2 + 24, py + 17, Theme.ACCENT);
 
         // inset surface grouping the material picks
-        Theme.drawInset(px + 5, py + 20, px + 142, py + 104);
+        Theme.drawInset(px + 5, py + 20, px + 142, py + 144);
 
         // inset surface grouping the offsets (bottom-left), label above the fields
-        Theme.drawInset(px + 5, py + 104, px + 142, py + 190);
-        fontRenderer.drawString(I18n.format("ip.gui.offset_group"), px + 12, py + 110, Theme.ACCENT_TEXT);
+        Theme.drawInset(px + 5, py + 144, px + 142, py + 232);
+        fontRenderer.drawString(I18n.format("ip.gui.offset_group"), px + 12, py + 149, Theme.ACCENT_TEXT);
 
         // section labels
         fontRenderer.drawString(I18n.format("ip.gui.size"), px + COL_A, py + 24, Theme.TEXT_SUB);
@@ -397,9 +417,9 @@ public class GuiPlatformConfig extends GuiScreen {
         fontRenderer.drawString(I18n.format("ip.gui.count_z"), px + COL_A, py + 56, Theme.TEXT_SUB);
         fontRenderer.drawString(I18n.format("ip.gui.link"), px + COL_B, py + 56, Theme.TEXT_SUB);
         // offset labels sit left of each field (X / Y / Z)
-        fontRenderer.drawString("X", px + 28, py + 125, Theme.TEXT_SUB);
-        fontRenderer.drawString("Y", px + 28, py + 169, Theme.TEXT_SUB);
-        fontRenderer.drawString("Z", px + 28, py + 147, Theme.TEXT_SUB);
+        fontRenderer.drawString("X", px + 28, py + 164, Theme.TEXT_SUB);
+        fontRenderer.drawString("Z", px + 28, py + 186, Theme.TEXT_SUB);
+        fontRenderer.drawString("Y", px + 28, py + 208, Theme.TEXT_SUB);
 
         super.drawScreen(mouseX, mouseY, partialTicks);
 
@@ -416,11 +436,9 @@ public class GuiPlatformConfig extends GuiScreen {
             fontRenderer.drawString(statusText, px + 8, py + PANEL_H - 12, statusColor);
         }
 
-        boolean canBuild = hasBuilder() && MaterialScanner.missing(mc.player,
-                MaterialScanner.required(mc.world, pos, cfg)).isEmpty();
-        btnBuild.enabled = canBuild;
-        boolean buildHovered = mouseX >= px + COL_A && mouseY >= py + 154
-                && mouseX < px + COL_B + COL_W && mouseY < py + 154 + 18;
+        btnBuild.enabled = builderKnown();
+        boolean buildHovered = mouseX >= px + COL_A && mouseY >= py + 194
+                && mouseX < px + COL_B + COL_W && mouseY < py + 194 + 18;
         if (buildHovered) {
             drawHoveringText(buildTooltip(), mouseX, mouseY);
         }
@@ -436,7 +454,7 @@ public class GuiPlatformConfig extends GuiScreen {
     /** Material bill for the current configuration against the real world. */
     private List<String> buildTooltip() {
         List<String> lines = new java.util.ArrayList<String>();
-        if (!hasBuilder()) {
+        if (!builderKnown()) {
             lines.add(I18n.format("ip.gui.no_builder"));
             return lines;
         }
@@ -456,6 +474,7 @@ public class GuiPlatformConfig extends GuiScreen {
         Map<BlockRef, Integer> missing = MaterialScanner.missing(mc.player, bill);
         if (!missing.isEmpty()) {
             lines.add(I18n.format("ip.gui.missing") + ": " + MaterialScanner.formatMissing(missing));
+            lines.add(I18n.format("ip.gui.source_note"));
         }
         return lines;
     }

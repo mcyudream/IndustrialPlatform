@@ -30,9 +30,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Block picker for a role. Two modes: every registered block (searchable, with
- * a metadata stepper), or a one-click pick straight from the player's own
- * inventory — no more scrolling through the whole registry.
+ * Block picker for a role — inventory blocks only: one-click pick straight from
+ * what the player is carrying (real metadata included), searchable.
  */
 @SideOnly(Side.CLIENT)
 public class GuiBlockPicker extends GuiScreen {
@@ -41,13 +40,10 @@ public class GuiBlockPicker extends GuiScreen {
     private static final int PANEL_H = 226;
     private static final int ROW_H = 18;
 
-    private static List<BlockRef> allBlocks;
-
     private final PlatformRole role;
     private final GuiPlatformConfig parent;
     private int meta;
 
-    private boolean inventoryMode;
     private List<BlockRef> filtered = new ArrayList<BlockRef>();
     private GuiTextField search;
     private int scroll;
@@ -69,48 +65,15 @@ public class GuiBlockPicker extends GuiScreen {
 
         buttonList.clear();
 
-        search = new GuiTextField(0, this.fontRenderer, px + 8, py + 20, 118, 14);
+        search = new GuiTextField(0, this.fontRenderer, px + 8, py + 20, 160, 14);
         search.setMaxStringLength(64);
         search.setFocused(true);
 
-        buttonList.add(new DarkButton(35, px + 130, py + 20, 44, 14, I18n.format("ip.gui.mode.all")));
-        buttonList.add(new DarkButton(36, px + 176, py + 20, 44, 14, I18n.format("ip.gui.mode.inv")));
-        buttonList.add(new DarkButton(30, px + 224, py + 20, 16, 14, "-"));
-        buttonList.add(new DarkButton(31, px + 296, py + 20, 16, 14, "+"));
         buttonList.add(new DarkButton(32, px + 8, py + PANEL_H - 22, 20, 16, "<"));
         buttonList.add(new DarkButton(33, px + 32, py + PANEL_H - 22, 20, 16, ">"));
         buttonList.add(new DarkButton(34, px + PANEL_W - 88, py + PANEL_H - 22, 80, 16, I18n.format("ip.gui.picker.air")));
 
         applyMode();
-    }
-
-    private static List<BlockRef> all() {
-        if (allBlocks == null) {
-            List<BlockRef> list = new ArrayList<BlockRef>();
-            for (Block block : Block.REGISTRY) {
-                if (block == null || block == Blocks.AIR) {
-                    continue;
-                }
-                if (Item.getItemFromBlock(block) == null) {
-                    continue;
-                }
-                list.add(new BlockRef(block, 0));
-            }
-            Collections.sort(list, new Comparator<BlockRef>() {
-                @Override
-                public int compare(BlockRef a, BlockRef b) {
-                    return nameOf(a).compareTo(nameOf(b));
-                }
-            });
-            allBlocks = list;
-        }
-        return allBlocks;
-    }
-
-    private static String nameOf(BlockRef ref) {
-        ResourceLocation name = ref.block == null ? null
-                : Block.REGISTRY.getNameForObject(ref.block);
-        return name == null ? "" : name.toString();
     }
 
     /** Player inventory blocks, hotbar first, duplicates collapsed. */
@@ -131,16 +94,15 @@ public class GuiBlockPicker extends GuiScreen {
     }
 
     private void applyMode() {
-        filtered = new ArrayList<BlockRef>(inventoryMode ? inventoryRefs() : all());
         applyFilter();
     }
 
     private void applyFilter() {
         String needle = search.getText().toLowerCase().trim();
-        List<BlockRef> source = inventoryMode ? inventoryRefs() : all();
         filtered.clear();
-        for (BlockRef ref : source) {
-            if (needle.isEmpty() || nameOf(ref).contains(needle)
+        for (BlockRef ref : inventoryRefs()) {
+            String name = registryName(ref);
+            if (needle.isEmpty() || name.contains(needle)
                     || displaySafe(ref).toLowerCase().contains(needle)) {
                 filtered.add(ref);
             }
@@ -148,11 +110,16 @@ public class GuiBlockPicker extends GuiScreen {
         clampScroll();
     }
 
+    private static String registryName(BlockRef ref) {
+        ResourceLocation name = ref.block == null ? null : Block.REGISTRY.getNameForObject(ref.block);
+        return name == null ? "" : name.toString();
+    }
+
     private String displaySafe(BlockRef ref) {
         try {
             return ref.displayName();
         } catch (Exception e) {
-            return nameOf(ref);
+            return registryName(ref);
         }
     }
 
@@ -219,12 +186,6 @@ public class GuiBlockPicker extends GuiScreen {
     @Override
     protected void actionPerformed(GuiButton button) throws IOException {
         switch (button.id) {
-            case 30:
-                meta = MathHelper.clamp(meta - 1, 0, 15);
-                break;
-            case 31:
-                meta = MathHelper.clamp(meta + 1, 0, 15);
-                break;
             case 32:
                 scroll -= visibleRows((height - PANEL_H) / 2);
                 clampScroll();
@@ -237,28 +198,13 @@ public class GuiBlockPicker extends GuiScreen {
                 parent.onRolePicked(role, BlockRef.AIR);
                 backToParent();
                 break;
-            case 35:
-                inventoryMode = false;
-                applyMode();
-                break;
-            case 36:
-                inventoryMode = true;
-                scroll = 0;
-                applyMode();
-                break;
             default:
                 break;
         }
     }
 
     private void pick(BlockRef ref) {
-        if (inventoryMode) {
-            parent.onRolePicked(role, ref);
-        } else {
-            IBlockState state = ref.block.getStateFromMeta(meta);
-            int safeMeta = ref.block.getMetaFromState(state);
-            parent.onRolePicked(role, new BlockRef(ref.block, safeMeta));
-        }
+        parent.onRolePicked(role, ref);
         backToParent();
     }
 
@@ -287,12 +233,6 @@ public class GuiBlockPicker extends GuiScreen {
             frame(search.x - 1, search.y - 1, search.x + search.width + 1, search.y + search.height + 1, Theme.ACCENT);
         }
 
-        ((DarkButton) buttonList.get(1)).accent = !inventoryMode;
-        ((DarkButton) buttonList.get(2)).accent = inventoryMode;
-
-        fontRenderer.drawString(I18n.format("ip.gui.picker.meta") + ": " + meta, px + 244, py + 23,
-                inventoryMode ? Theme.TEXT_DISABLED : Theme.TEXT_SUB);
-
         int lx = px + 8;
         int ly = listY(py);
         int bottom = listBottom(py);
@@ -309,15 +249,14 @@ public class GuiBlockPicker extends GuiScreen {
                 drawRect(lx + 1, rowY, px + PANEL_W - 9, rowY + ROW_H, Theme.ROW_HOVER);
                 drawRect(lx + 1, rowY, lx + 3, rowY + ROW_H, Theme.ACCENT);
             }
-            ItemStack stack = inventoryMode ? ref.toStack(1)
-                    : new ItemStack(ref.block, 1, ref.block.getMetaFromState(ref.block.getStateFromMeta(meta)));
+            ItemStack stack = ref.toStack(1);
             if (!stack.isEmpty()) {
                 RenderHelperHolder.enable();
                 mc.getRenderItem().renderItemAndEffectIntoGUI(stack, lx + 6, rowY + 1);
                 RenderHelperHolder.disable();
             }
             fontRenderer.drawString(displaySafe(ref), lx + 25, rowY + 2, Theme.TEXT);
-            fontRenderer.drawString(nameOf(ref), lx + 25, rowY + 10, Theme.TEXT_SUB);
+            fontRenderer.drawString(registryName(ref), lx + 25, rowY + 10, Theme.TEXT_SUB);
             index++;
             rowY += ROW_H;
         }

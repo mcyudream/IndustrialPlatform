@@ -5,8 +5,10 @@ package dev.celestiacraft.industrialplatform.platform;
  */
 public enum PlatformRole {
     BORDER("border"),
+    BORDER2("border2"),
     FILL("fill"),
     CENTER("center"),
+    CORNER("corner"),
     BOUNDARY("boundary"),
     LINK("link"),
     BODY("body"),

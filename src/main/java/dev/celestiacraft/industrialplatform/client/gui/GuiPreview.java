@@ -174,41 +174,7 @@ public class GuiPreview extends GuiScreen {
 
     /** Patchouli-style isometric render of the surface layer's blocks. */
     private void drawIsometric(int centerX, int centerY, PlatformLayout layout) {
-        GlStateManager.pushMatrix();
-        GlStateManager.translate(centerX, centerY, 100.0F);
-        GlStateManager.rotate(rotX, 1.0F, 0.0F, 0.0F);
-        GlStateManager.rotate(rotY, 0.0F, 1.0F, 0.0F);
-
-        float scale = Math.min(90.0F / Math.max(layout.sizeX, layout.sizeZ), 14.0F);
-        GlStateManager.scale(scale, -scale, scale);
-        GlStateManager.translate(-layout.centerX - 0.5F, -1.0F, -layout.centerZ - 0.5F);
-
-        net.minecraft.client.renderer.RenderHelper.enableStandardItemLighting();
-        GlStateManager.enableDepth();
-        GlStateManager.enableRescaleNormal();
-
-        Minecraft mc = Minecraft.getMinecraft();
-        mc.getTextureManager().bindTexture(TextureMap.LOCATION_BLOCKS_TEXTURE);
-        BlockRendererDispatcher dispatcher = mc.getBlockRendererDispatcher();
-
-        for (int z = 0; z < layout.sizeZ; z++) {
-            for (int x = 0; x < layout.sizeX; x++) {
-                PlatformRole role = layout.roleAt(cfg.layers - 1, x, z);
-                BlockRef ref = cfg.get(role);
-                if (ref.isAir()) {
-                    continue;
-                }
-                GlStateManager.pushMatrix();
-                GlStateManager.translate(x, 0, z);
-                dispatcher.renderBlockBrightness(ref.block.getStateFromMeta(ref.meta), 1.0F);
-                GlStateManager.popMatrix();
-            }
-        }
-
-        GlStateManager.disableRescaleNormal();
-        GlStateManager.disableDepth();
-        net.minecraft.client.renderer.RenderHelper.disableStandardItemLighting();
-        GlStateManager.popMatrix();
+        IsoPreview.drawSurface(mc, cfg, centerX, centerY, 180, rotX, rotY);
     }
 
     @Override

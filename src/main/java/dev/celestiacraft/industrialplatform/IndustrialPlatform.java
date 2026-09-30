@@ -31,7 +31,7 @@ public class IndustrialPlatform {
 
     public static final String MODID = "industrial_platform";
     public static final String NAME = "Industrial Platform";
-    public static final String VERSION = "2.1.0";
+    public static final String VERSION = "2.4.2";
 
     @SidedProxy(clientSide = "dev.celestiacraft.industrialplatform.proxy.ClientProxy",
             serverSide = "dev.celestiacraft.industrialplatform.proxy.CommonProxy")
@@ -50,6 +50,14 @@ public class IndustrialPlatform {
         NETWORK.registerMessage(PacketConfig.Handler.class, PacketConfig.class, 0, Side.SERVER);
         NETWORK.registerMessage(dev.celestiacraft.industrialplatform.network.PacketBuildComplete.Handler.class,
                 dev.celestiacraft.industrialplatform.network.PacketBuildComplete.class, 1, Side.CLIENT);
+        NETWORK.registerMessage(dev.celestiacraft.industrialplatform.network.PacketConfigRequest.Handler.class,
+                dev.celestiacraft.industrialplatform.network.PacketConfigRequest.class, 2, Side.SERVER);
+        NETWORK.registerMessage(dev.celestiacraft.industrialplatform.network.PacketConfigSync.Handler.class,
+                dev.celestiacraft.industrialplatform.network.PacketConfigSync.class, 3, Side.CLIENT);
+        NETWORK.registerMessage(dev.celestiacraft.industrialplatform.network.PacketMaterialRequest.Handler.class,
+                dev.celestiacraft.industrialplatform.network.PacketMaterialRequest.class, 4, Side.SERVER);
+        NETWORK.registerMessage(dev.celestiacraft.industrialplatform.network.PacketMaterialStatus.Handler.class,
+                dev.celestiacraft.industrialplatform.network.PacketMaterialStatus.class, 5, Side.CLIENT);
 
         GameRegistry.registerTileEntity(TilePlatformBuilder.class,
                 new ResourceLocation(MODID, "platform_builder"));
@@ -65,6 +73,6 @@ public class IndustrialPlatform {
     @Mod.EventHandler
     public void serverStarting(FMLServerStartingEvent event) {
         event.registerServerCommand(new CommandBlueprints());
-        BlueprintLibrary.load(event.getServer().getDataDirectory());
+        BlueprintLibrary.load(event.getServer().getDataDirectory(), "server-start");
     }
 }

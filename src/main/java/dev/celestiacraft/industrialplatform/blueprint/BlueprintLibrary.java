@@ -50,7 +50,11 @@ public final class BlueprintLibrary {
         return Collections.unmodifiableList(BLUEPRINTS);
     }
 
-    public static synchronized int load(File gameDir) {
+    public static int load(File gameDir) {
+        return load(gameDir, "unspecified");
+    }
+
+    public static synchronized int load(File gameDir, String source) {
         List<Blueprint> loaded = new ArrayList<Blueprint>();
 
         File jsonDir = new File(gameDir, "config/industrial_platform/blueprints");
@@ -63,7 +67,7 @@ public final class BlueprintLibrary {
         BLUEPRINTS.clear();
         BLUEPRINTS.addAll(loaded);
         if (IndustrialPlatform.LOGGER != null) {
-            IndustrialPlatform.LOGGER.info("Loaded {} platform blueprint(s)", BLUEPRINTS.size());
+            IndustrialPlatform.LOGGER.info("Loaded {} platform blueprint(s) [{}]", BLUEPRINTS.size(), source);
         }
         return BLUEPRINTS.size();
     }

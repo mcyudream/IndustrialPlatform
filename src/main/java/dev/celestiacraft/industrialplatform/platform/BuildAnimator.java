@@ -33,8 +33,13 @@ public final class BuildAnimator {
 
     public static void submit(WorldServer world, PlatformGenerator.BuildPlan plan, EntityPlayerMP player,
                               boolean replaceExisting) {
+        submit(world, plan, player, replaceExisting, null);
+    }
+
+    public static void submit(WorldServer world, PlatformGenerator.BuildPlan plan, EntityPlayerMP player,
+                              boolean replaceExisting, net.minecraft.util.math.BlockPos builderPos) {
         if (!plan.placements.isEmpty()) {
-            JOBS.add(new Job(world, plan, player, replaceExisting));
+            JOBS.add(new Job(world, plan, player, replaceExisting, builderPos));
         }
     }
 
@@ -59,7 +64,19 @@ public final class BuildAnimator {
                     job.player.sendMessage(new TextComponentTranslation(
                             "ip.msg.build_success", job.placed, job.matched, job.skipped));
                     dev.celestiacraft.industrialplatform.IndustrialPlatform.NETWORK.sendTo(
-                            new dev.celestiacraft.industrialplatform.network.PacketBuildComplete(), job.player);
+                            new dev.celestiacraft.industrialplatform.network.PacketBuildComplete(job.builderPos), job.player);
+                }
+                // the persistent preview dies with the finished build — store it
+                if (job.builderPos != null) {
+                    net.minecraft.tileentity.TileEntity te = job.world.getTileEntity(job.builderPos);
+                    if (te instanceof dev.celestiacraft.industrialplatform.tile.TilePlatformBuilder) {
+                        dev.celestiacraft.industrialplatform.config.PlatformConfig config =
+                                ((dev.celestiacraft.industrialplatform.tile.TilePlatformBuilder) te).getConfig();
+                        if (config.previewOn) {
+                            config.previewOn = false;
+                            ((dev.celestiacraft.industrialplatform.tile.TilePlatformBuilder) te).setConfig(config);
+                        }
+                    }
                 }
             }
         }
@@ -97,18 +114,21 @@ public final class BuildAnimator {
         final Deque<PlatformGenerator.Placement> queue;
         final EntityPlayerMP player;
         final boolean replaceExisting;
+        final net.minecraft.util.math.BlockPos builderPos;
         final int total;
         int placed;
         int matched;
         int skipped;
 
-        Job(WorldServer world, PlatformGenerator.BuildPlan plan, EntityPlayerMP player, boolean replaceExisting) {
+        Job(WorldServer world, PlatformGenerator.BuildPlan plan, EntityPlayerMP player, boolean replaceExisting,
+            net.minecraft.util.math.BlockPos builderPos) {
             this.world = world;
             this.queue = new ArrayDeque<PlatformGenerator.Placement>(plan.placements);
             this.total = plan.placements.size();
             this.matched = plan.matched;
             this.player = player;
             this.replaceExisting = replaceExisting;
+            this.builderPos = builderPos;
         }
     }
 }

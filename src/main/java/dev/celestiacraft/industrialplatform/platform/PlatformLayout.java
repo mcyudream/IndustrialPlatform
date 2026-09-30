@@ -39,9 +39,10 @@ public final class PlatformLayout {
         this.link = cfg.linkWidth;
         this.countX = cfg.countX;
         this.countZ = cfg.countZ;
-        // link strips: linkWidth of pure road plus a 1-wide border rim each side;
+        // link strips are pure road — each cell carries its own 1-wide border
+        // ring, so an extra strip rim would make the border read as 2 blocks
         // linkWidth 0 = no strip at all (cells merge seamlessly)
-        this.gap = link > 0 ? link + 2 : 0;
+        this.gap = link > 0 ? link : 0;
         this.sizeX = countX * cellX + (countX - 1) * gap;
         this.sizeZ = countZ * cellZ + (countZ - 1) * gap;
         // anchor is always the CENTER CELL's center — expansion grows outward
@@ -65,47 +66,34 @@ public final class PlatformLayout {
         boolean top = layer >= cfg.layers - 1;
 
         if (inCellX && inCellZ) {
-            return cellRole(layer, px, pz, cellX, cellZ, gi, gj, top);
+            return cellRole(layer, x, z, px, pz, cellX, cellZ, top);
         }
 
-        // connecting strip: the road (linkWidth of link/fill) with a 1-wide
-        // border rim on each side — the border does NOT count into linkWidth.
-        // the facing rings of the cells are suppressed (see cellRole).
-        // at crossings the interior of either strip wins, so roads read as one
-        // continuous surface with only a neat corner frame
-        boolean stripX = !inCellX;
-        boolean stripZ = !inCellZ;
-        if (stripX || stripZ) {
-            boolean interior = stripX && px > cellX && px < periodX - 1
-                    || stripZ && pz > cellZ && pz < periodZ - 1;
-            if (!top) {
-                return interior ? PlatformRole.FILL : PlatformRole.BORDER;
-            }
-            if (interior) {
-                BlockRef road = cfg.get(PlatformRole.LINK);
-                return road.isAir() ? PlatformRole.FILL : PlatformRole.LINK;
-            }
-            if (!cfg.get(PlatformRole.BORDER).isAir()) {
-                return PlatformRole.BORDER;
-            }
+        // connecting strip: pure road of linkWidth — the cells on both sides
+        // carry their own border rings, no rim needed here
+        if (!inCellX || !inCellZ) {
             BlockRef road = cfg.get(PlatformRole.LINK);
             return road.isAir() ? PlatformRole.FILL : PlatformRole.LINK;
         }
         return PlatformRole.FILL;
     }
 
-    private PlatformRole cellRole(int layer, int lx, int lz, int sx, int sz, int gi, int gj, boolean top) {
-        // ring only on the outer boundary of the whole platform — interior edges
-        // facing a link strip are bordered by the strip itself (1 wide)
-        boolean ring = lx == 0 && gi == 0 || lx == sx - 1 && gi == countX - 1
-                || lz == 0 && gj == 0 || lz == sz - 1 && gj == countZ - 1;
+    private PlatformRole cellRole(int layer, int absX, int absZ, int lx, int lz, int sx, int sz, boolean top) {
+        // every cell is a complete framed platform ("每格是完整平台"): the ring is
+        // the cell's own boundary. A ring only on the whole platform's outer edge
+        // made interior cells one block wider than boundary cells (14x14 vs 14x13).
+        boolean ring = lx == 0 || lx == sx - 1 || lz == 0 || lz == sz - 1;
 
-        // simplified scheme: edges all use the border material, interior the fill
-        if (!top) {
-            return ring ? PlatformRole.BORDER : PlatformRole.FILL;
-        }
+        // ring alternates border / border2 by absolute position parity, so the
+        // two colours swap every block along an edge — easy to count positions
         if (ring) {
-            return PlatformRole.BORDER;
+            boolean alt = ((absX + absZ) & 1) == 1;
+            return alt && !cfg.get(PlatformRole.BORDER2).isAir()
+                    ? PlatformRole.BORDER2 : PlatformRole.BORDER;
+        }
+        // interior uses the fill material
+        if (!top) {
+            return PlatformRole.FILL;
         }
 
         int cx = (sx - 1) / 2;
@@ -150,18 +138,111 @@ public final class PlatformLayout {
         return lz <= cz || dx == half;
     }
 
+    /**
+     * Final material at (x, z) on the TOP surface, including the center overlay
+     * that the generator places independently of the role pass. This is the
+     * single source of truth for the hologram, the isometric GUI preview and
+     * the raw material bill, so they all show exactly what gets built.
+     */
+    public BlockRef surfaceRefAt(int x, int z) {
+        int periodX = cellX + gap;
+        int periodZ = cellZ + gap;
+        int px = x % periodX;
+        int pz = z % periodZ;
+        if (px >= 0 && px < cellX && pz >= 0 && pz < cellZ) {
+            BlockRef center = cfg.get(PlatformRole.CENTER);
+            if (!center.isAir() && isCenterCell(px, pz, cellX, cellZ)) {
+                return center;
+            }
+            BlockRef corner = cfg.get(PlatformRole.CORNER);
+            if (!corner.isAir() && isCorner(x, z)) {
+                return corner;
+            }
+        }
+        return cfg.get(roleAt(cfg.layers - 1, x, z));
+    }
+
+    /**
+     * Torch grid for the auto-torch option: a regular footprint-wide grid
+     * (spacing 12, centred on the platform) of standing torch spots at
+     * surfaceY + 1. Spots already covered by a light-emitting corner marker
+     * are skipped. Layout-relative coordinates.
+     */
+    public java.util.List<int[]> torchSpots() {
+        java.util.List<int[]> spots = new java.util.ArrayList<int[]>();
+        BlockRef corner = cfg.get(PlatformRole.CORNER);
+        int cornerLight = 0;
+        try {
+            if (!corner.isAir()) {
+                cornerLight = corner.block.getStateFromMeta(corner.meta).getLightValue();
+            }
+        } catch (Throwable ignored) {
+        }
+        java.util.List<int[]> lights = new java.util.ArrayList<int[]>();
+        if (cornerLight > 0) {
+            for (int z = 0; z < sizeZ; z++) {
+                for (int x = 0; x < sizeX; x++) {
+                    if (isCorner(x, z)) {
+                        lights.add(new int[]{x, z});
+                    }
+                }
+            }
+        }
+        int spacing = 12;
+        for (int z = centerZ % spacing; z < sizeZ; z += spacing) {
+            for (int x = centerX % spacing; x < sizeX; x += spacing) {
+                boolean lit = false;
+                for (int[] light : lights) {
+                    int dx = x - light[0];
+                    int dz = z - light[1];
+                    if (dx * dx + dz * dz <= 12 * 12) {
+                        lit = true;
+                        break;
+                    }
+                }
+                if (!lit) {
+                    spots.add(new int[]{x, z});
+                }
+            }
+        }
+        return spots;
+    }
+
+    /**
+     * Whether (x, z) is one of the four corners of any cell's EFFECTIVE area
+     * (the interior inside the border ring). The corner marker REPLACES the
+     * surface block there — nothing is placed on top.
+     */
+    public boolean isCorner(int x, int z) {
+        int periodX = cellX + gap;
+        int periodZ = cellZ + gap;
+        int px = x % periodX;
+        int pz = z % periodZ;
+        return px >= 0 && px < cellX && pz >= 0 && pz < cellZ
+                && (px == 1 || px == cellX - 2) && (pz == 1 || pz == cellZ - 2);
+    }
+
     /** Exact per-block material bill for this configuration. */
     public Map<BlockRef, Integer> requiredMaterials() {
         Map<BlockRef, Integer> counts = new LinkedHashMap<BlockRef, Integer>();
         for (int layer = 0; layer < cfg.layers; layer++) {
             for (int z = 0; z < sizeZ; z++) {
                 for (int x = 0; x < sizeX; x++) {
-                    BlockRef ref = cfg.get(roleAt(layer, x, z));
+                    BlockRef ref = layer == cfg.layers - 1
+                            ? surfaceRefAt(x, z)
+                            : cfg.get(roleAt(layer, x, z));
                     if (!ref.isAir()) {
                         Integer old = counts.get(ref);
                         counts.put(ref, old == null ? 1 : old + 1);
                     }
                 }
+            }
+        }
+        if (cfg.autoTorches) {
+            BlockRef torch = new BlockRef(net.minecraft.init.Blocks.TORCH, 0);
+            int torchCount = torchSpots().size();
+            if (torchCount > 0) {
+                counts.put(torch, torchCount);
             }
         }
         return counts;

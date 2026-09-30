@@ -89,7 +89,9 @@ public class PacketConfig implements IMessage {
             // world-aware bill: positions already holding the right block cost nothing
             java.util.Map<BlockRef, Integer> bill = MaterialScanner.required(world, message.pos, config);
             if (!player.capabilities.isCreativeMode) {
-                java.util.Map<BlockRef, Integer> missing = MaterialScanner.missing(player, bill);
+                // sources: player inventory + adjacent containers + AE2 network (soft)
+                java.util.Map<BlockRef, Integer> missing = dev.celestiacraft.industrialplatform.platform.MaterialBroker
+                        .missing(world, message.pos, player, bill);
                 if (!missing.isEmpty()) {
                     player.sendMessage(new TextComponentTranslation("ip.msg.missing_list",
                             MaterialScanner.formatMissing(missing)));
@@ -99,10 +101,11 @@ public class PacketConfig implements IMessage {
 
             PlatformGenerator.BuildPlan plan = PlatformGenerator.plan(world, message.pos, config);
             if (!player.capabilities.isCreativeMode) {
-                java.util.Map<BlockRef, Integer> consumed = MaterialScanner.consume(player, bill);
+                java.util.Map<BlockRef, Integer> consumed = dev.celestiacraft.industrialplatform.platform.MaterialBroker
+                        .consume(world, message.pos, player, bill);
                 player.sendMessage(new TextComponentTranslation("ip.msg.consumed", consumed.size()));
             }
-            BuildAnimator.submit(world, plan, player, config.replaceExisting);
+            BuildAnimator.submit(world, plan, player, config.replaceExisting, message.pos);
             player.sendMessage(new TextComponentTranslation("ip.msg.build_started"));
             player.inventoryContainer.detectAndSendChanges();
         }

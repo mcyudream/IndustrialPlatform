@@ -1,7 +1,6 @@
 {
   "variants": {
-    "normal": {
-      "model": "industrial_platform:platform_builder"
-    }
+    "normal": { "model": "industrial_platform:platform_builder" },
+    "inventory": { "model": "industrial_platform:platform_builder" }
   }
 }
