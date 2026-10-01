@@ -34,11 +34,13 @@ public final class MaterialBroker {
             return missing;
         }
         Object storageGrid = AeNetwork.storage(world, pos);
+        Object terminalGrid = AeNetwork.storageFromPlayer(player);
         List<IItemHandler> containers = adjacentHandlers(world, pos);
         for (Map.Entry<BlockRef, Integer> entry : bill.entrySet()) {
             long have = MaterialScanner.countOf(player, entry.getKey());
             have += countInContainers(containers, entry.getKey());
             have += AeNetwork.count(storageGrid, itemOf(entry.getKey()), entry.getKey().meta);
+            have += AeNetwork.count(terminalGrid, itemOf(entry.getKey()), entry.getKey().meta);
             if (have < entry.getValue()) {
                 missing.put(entry.getKey(), (int) (entry.getValue() - have));
             }
@@ -53,11 +55,13 @@ public final class MaterialBroker {
             return consumed;
         }
         Object storageGrid = AeNetwork.storage(world, pos);
+        Object terminalGrid = AeNetwork.storageFromPlayer(player);
         for (Map.Entry<BlockRef, Integer> entry : bill.entrySet()) {
             int remaining = entry.getValue();
             remaining -= takeFromPlayer(player, entry.getKey(), remaining);
             remaining -= takeFromContainers(world, pos, entry.getKey(), remaining);
             remaining -= AeNetwork.extract(storageGrid, player, itemOf(entry.getKey()), entry.getKey().meta, remaining);
+            remaining -= AeNetwork.extract(terminalGrid, player, itemOf(entry.getKey()), entry.getKey().meta, remaining);
             if (remaining < entry.getValue()) {
                 consumed.put(entry.getKey(), entry.getValue() - remaining);
             }

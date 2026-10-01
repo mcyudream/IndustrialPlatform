@@ -59,6 +59,15 @@ final class AeNetwork {
     private static Method storageExtract;
     private static Method keyFactory; // AEItemKey.of(ItemStack)
 
+    // linked-terminal sourcing (modern only)
+    private static Class<?> termItemClass;
+    private static Method termGetLinkedGrid;
+    private static Method termGetLinkedGridItem;
+    private static Method apiIsUniversal;
+    private static Method apiOfStack;
+    private static Method defItem;
+    private static Object noopConsumer;
+
     // classic (appeng.*)
     private static Object partInternal;
     private static Method classicGetNode;
@@ -103,6 +112,69 @@ final class AeNetwork {
             }
         } catch (Throwable t) {
             disable(t);
+        }
+        return null;
+    }
+
+    /**
+     * ME storage handle reachable through a LINKED terminal the player carries
+     * (wireless / universal terminal, following the terminal's own linkage and
+     * range rules), or null. Modern API only — classic packs use the
+     * adjacent-part path.
+     */
+    static Object storageFromPlayer(EntityPlayer player) {
+        if (broken || player == null || !init() || !modern || termItemClass == null) {
+            return null;
+        }
+        java.util.List<ItemStack> stacks = new java.util.ArrayList<ItemStack>();
+        stacks.addAll(player.inventory.mainInventory);
+        stacks.addAll(player.inventory.offHandInventory);
+        for (ItemStack stack : stacks) {
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            try {
+                Object grid = linkedGrid(stack, player);
+                if (grid == null) {
+                    continue;
+                }
+                Object service = gridGetStorageService.invoke(grid);
+                Object handle = service == null ? null : storageGetInventory.invoke(service);
+                if (handle != null) {
+                    if (!loggedOk) {
+                        loggedOk = true;
+                        IndustrialPlatform.LOGGER.info(
+                                "[IP] AE2 network detected (modern API, linked terminal) — material sourcing enabled");
+                    }
+                    return handle;
+                }
+            } catch (Throwable ignored) {
+                // one odd stack must never disable AE sourcing
+            }
+        }
+        return null;
+    }
+
+    /** The grid a terminal stack is currently linked to, or null. */
+    private static Object linkedGrid(ItemStack stack, EntityPlayer player) {
+        Item item = stack.getItem();
+        if (termItemClass.isInstance(item)) {
+            try {
+                return termGetLinkedGrid.invoke(item, stack, player.getEntityWorld(), noopConsumer);
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
+        try {
+            if (apiIsUniversal != null && (Boolean) apiIsUniversal.invoke(null, stack)) {
+                Object def = apiOfStack.invoke(null, stack);
+                Object termItem = def == null ? null : defItem.invoke(def);
+                if (termItem != null) {
+                    return termGetLinkedGridItem.invoke(termItem, stack, termItem,
+                            player.getEntityWorld(), noopConsumer);
+                }
+            }
+        } catch (Throwable ignored) {
         }
         return null;
     }
@@ -259,10 +331,40 @@ final class AeNetwork {
             keyFactory = aeItemKeyClass.getMethod("of", ItemStack.class);
             actionableModulate = actionableClass.getField("MODULATE").get(null);
             playerSourceCtor = playerSourceCtor("ae2.me.helpers.PlayerSource");
+            initTerminalHooks();
             return playerSourceCtor != null;
         } catch (Throwable t) {
             modernFailReason = t.toString();
             return false;
+        }
+    }
+
+    /** Terminal sourcing hooks — optional: failing here only disables the
+     *  carried-terminal path, adjacent ME parts keep working. */
+    private static void initTerminalHooks() {
+        try {
+            termItemClass = Class.forName("ae2.items.tools.powered.WirelessTerminalItem");
+            Class<?> defClass = Class.forName("ae2.api.implementations.items.WirelessTerminalDefinition");
+            Class<?> apiClass = Class.forName("ae2.api.implementations.items.WirelessTerminalApi");
+            Class<?> consumerClass = Class.forName("java.util.function.Consumer");
+            termGetLinkedGrid = termItemClass.getMethod("getLinkedGrid",
+                    ItemStack.class, World.class, consumerClass);
+            termGetLinkedGridItem = termItemClass.getMethod("getLinkedGrid",
+                    ItemStack.class, termItemClass, World.class, consumerClass);
+            apiIsUniversal = apiClass.getMethod("isUniversalTerminal", ItemStack.class);
+            apiOfStack = apiClass.getMethod("ofStack", ItemStack.class);
+            defItem = defClass.getMethod("item");
+            noopConsumer = java.lang.reflect.Proxy.newProxyInstance(
+                    AeNetwork.class.getClassLoader(),
+                    new Class[]{consumerClass},
+                    new java.lang.reflect.InvocationHandler() {
+                        @Override
+                        public Object invoke(Object proxy, Method method, Object[] args) {
+                            return null; // swallow "not linked" / "out of range" reports
+                        }
+                    });
+        } catch (Throwable t) {
+            termItemClass = null; // carried-terminal sourcing unavailable
         }
     }
 

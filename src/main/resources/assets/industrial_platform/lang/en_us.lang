@@ -62,7 +62,7 @@ ip.msg.consumed=Consumed %s material kind(s)
 ip.msg.build_started=Building platform...
 ip.gui.need=Materials
 ip.gui.missing=Missing (inventory)
-ip.gui.source_note=Adjacent containers / AE network can cover the rest
+ip.gui.source_note=Can pull from adjacent containers / the AE network / a carried terminal; settling is server-side
 ip.gui.bill=Materials
 ip.gui.bill_empty=Nothing to consume
 

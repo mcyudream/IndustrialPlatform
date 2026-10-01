@@ -65,11 +65,13 @@ blueprints.register({
     border: "minecraft:iron_block",
     fill: "minecraft:glass",
     center: "minecraft:sea_lantern",
+    corner: "minecraft:glowstone",
     link: "minecraft:quartz_block",
     intervalX: 20, intervalZ: 20,
     countX: 2, countZ: 2,
     linkWidth: 3,
-    channelWidth: 1, channelMode: "HORSESHOE"
+    channelWidth: 1, channelMode: "HORSESHOE",
+    autoTorches: true
 });
 ```
 
@@ -78,13 +80,32 @@ blueprints.register({
 
 ### 蓝图字段
 
-| 字段 | 含义 |
-| --- | --- |
-| `border` `fill` `center` `link` `boundary` `body` `edge` `channelLine` `centerMarkBlock` | 方块引用 `modid:block[:meta]` |
-| `layers` `intervalX` `intervalZ` `countX` `countZ` `linkWidth` `channelWidth` | 数值 |
-| `offsetX` `offsetZ` `offsetY` | 锚点偏移（±64） |
-| `channelMode` | `NONE` / `STRAIGHT` / `HORSESHOE` |
-| `centerMark` `replaceExisting` | 布尔 |
+蓝图是**部分覆盖**：没写的字段沿用搭建器当前配置，应用后自动 clamp。
+方块格式 `modid:block[:meta]`，`air` 表示「无 / 继承」。
+
+| 字段 | 含义 | 范围 / 默认 |
+| --- | --- | --- |
+| `border` | 边框主方块，与 `border2` 沿边环逐格交替 | 默认石砖 |
+| `border2` | 边框交替第二材质；`air` = 退化为纯 border | 默认平滑石砖半砖2 |
+| `fill` | 内部填充（含未单独指定时的连接条） | 默认石头 |
+| `center` | 每格正中心的中心块 | 默认铁块 |
+| `corner` | 每格**有效区四角**的表面块替换为光源（替换而非叠放）；`air` = 继承普通表面块 | 默认萤石 |
+| `link` | 格间连接条材质；`air` = 跟随 fill | 默认 air |
+| `channel` | 表面开槽（`channelWidth > 0` 时）的槽底材质 | 默认萤石 |
+| `layers` | 竖向层数，顶层带表面图案 | 1–128，默认 1 |
+| `intervalX` `intervalZ` | 每格两排边框之间的内部净宽/净深 | 0–126，默认 14 |
+| `countX` `countZ` | X/Z 方向格数，多格无缝拼成大平台 | 1–8，默认 1 |
+| `linkWidth` | 格间道路宽；>0 即「纯道路」布局 | 0–31，默认 3 |
+| `channelWidth` | 表面开槽宽，0 = 不开槽 | 0–31，默认 0 |
+| `offsetX` `offsetZ` | 锚点相对区块中心的水平偏移 | ±64，默认 0 |
+| `offsetY` | 相对搭建器自身 Y 的竖向偏移 | ±64，默认 0 |
+| `channelMode` | 开槽形状 | `NONE` / `STRAIGHT` / `HORSESHOE` |
+| `centerMark` | 中心标记开关（遗留开关，mark 无材质时无效果） | 布尔，默认 false |
+| `replaceExisting` | true = 替换脚印内已有非匹配方块（照常计费）；false = 只填空气/流体/可替换方块 | 布尔，默认 true |
+| `autoTorches` | 照明网格自动插火把（按光照计算的排布） | 布尔，默认 false |
+
+`boundary` `body` `edge` `mark`（别名 `centerMarkBlock`）为旧版遗留角色，
+当前布局引擎已不使用，写入会被忽略；`previewOn` 为界面临时行为，不进蓝图。
 
 ## 构建方法
 

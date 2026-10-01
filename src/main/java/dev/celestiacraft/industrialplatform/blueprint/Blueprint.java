@@ -44,6 +44,7 @@ public final class Blueprint {
         }
         cfg.centerMarkOn = boolOf(data.get("centerMark"), cfg.centerMarkOn);
         cfg.replaceExisting = boolOf(data.get("replaceExisting"), cfg.replaceExisting);
+        cfg.autoTorches = boolOf(data.get("autoTorches"), cfg.autoTorches);
         cfg.blueprintName = name;
         cfg.clamp();
     }

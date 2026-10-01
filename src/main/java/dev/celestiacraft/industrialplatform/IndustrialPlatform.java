@@ -31,7 +31,7 @@ public class IndustrialPlatform {
 
     public static final String MODID = "industrial_platform";
     public static final String NAME = "Industrial Platform";
-    public static final String VERSION = "2.4.2";
+    public static final String VERSION = "2.4.4";
 
     @SidedProxy(clientSide = "dev.celestiacraft.industrialplatform.proxy.ClientProxy",
             serverSide = "dev.celestiacraft.industrialplatform.proxy.CommonProxy")

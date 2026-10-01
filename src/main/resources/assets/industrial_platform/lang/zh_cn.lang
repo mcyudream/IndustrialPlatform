@@ -63,7 +63,7 @@ ip.msg.consumed=已消耗 %s 种材料
 ip.msg.build_started=正在搭建平台...
 ip.gui.need=材料清单
 ip.gui.missing=缺少(背包)
-ip.gui.source_note=可从相邻容器/AE网络补足,点搭建由服务端结算
+ip.gui.source_note=可从相邻容器 / AE 网络 / 随身终端补足, 点搭建由服务端结算
 ip.gui.bill=材料清单
 ip.gui.bill_empty=没有需要消耗的材料
 
